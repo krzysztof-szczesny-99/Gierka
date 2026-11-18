@@ -1,5 +1,6 @@
 import * as Phaser from 'phaser';
 import { useEffect, useRef } from 'react';
+import { expose } from '../debug';
 import { BootScene } from './scenes/BootScene';
 import { OverworldScene } from './scenes/OverworldScene';
 
@@ -26,6 +27,7 @@ export function PhaserGame() {
       },
       scene: [BootScene, OverworldScene],
     });
+    expose('game', game);
     return () => {
       game.destroy(true);
     };
