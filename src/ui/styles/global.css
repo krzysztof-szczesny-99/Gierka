@@ -212,6 +212,33 @@ input {
   border-color: var(--accent);
   background: var(--panel-2);
 }
+.gen-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.gen-grid button {
+  min-height: 48px;
+  border-radius: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  font-weight: 700;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.15;
+}
+.gen-grid button small {
+  font-weight: 500;
+  font-size: 0.72rem;
+  opacity: 0.8;
+}
+.gen-grid button.on {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: transparent;
+}
 .starter-card h3 {
   margin: 0 0 6px;
 }

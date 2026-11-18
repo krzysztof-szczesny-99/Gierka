@@ -76,6 +76,24 @@ export const ENCOUNTER_TABLES: Record<string, EncounterTable> = {
   },
 };
 
-/** Startery: ukłon w stronę inspiracji (HGSS, Emerald, Platinum). */
-export const STARTERS = ['chikorita', 'torchic', 'piplup'];
+/** Startery każdej generacji (trawiasty, ognisty, wodny). Dane i grafiki pobierane z PokéAPI po nazwie. */
+export interface StarterGeneration {
+  gen: number;
+  roman: string;
+  region: string;
+  starters: [string, string, string];
+}
+
+export const STARTER_GENERATIONS: StarterGeneration[] = [
+  { gen: 1, roman: 'I', region: 'Kanto', starters: ['bulbasaur', 'charmander', 'squirtle'] },
+  { gen: 2, roman: 'II', region: 'Johto', starters: ['chikorita', 'cyndaquil', 'totodile'] },
+  { gen: 3, roman: 'III', region: 'Hoenn', starters: ['treecko', 'torchic', 'mudkip'] },
+  { gen: 4, roman: 'IV', region: 'Sinnoh', starters: ['turtwig', 'chimchar', 'piplup'] },
+  { gen: 5, roman: 'V', region: 'Unova', starters: ['snivy', 'tepig', 'oshawott'] },
+  { gen: 6, roman: 'VI', region: 'Kalos', starters: ['chespin', 'fennekin', 'froakie'] },
+  { gen: 7, roman: 'VII', region: 'Alola', starters: ['rowlet', 'litten', 'popplio'] },
+  { gen: 8, roman: 'VIII', region: 'Galar', starters: ['grookey', 'scorbunny', 'sobble'] },
+  { gen: 9, roman: 'IX', region: 'Paldea', starters: ['sprigatito', 'fuecoco', 'quaxly'] },
+];
+
 export const STARTER_LEVEL = 5;

@@ -83,6 +83,7 @@ zapis, zbuforowane dane i sprite'y; na mapie pojawiają się tylko gatunki, któ
 
 ## Funkcje gotowe (etap 1)
 
+- Wybór startera spośród trzech stworzeń z każdej z 9 generacji (dane i grafiki pobierane z PokéAPI po otwarciu generacji).
 - Oryginalna mapa testowa 40×32 (Polana Startowa) z czterema strefami: Łąka, Brzeg Stawu, Skalny Zakątek, Cichy Gaj.
 - Ruch po siatce: pad, dotknięcie celu (wyszukiwanie ścieżki BFS), klawiatura; bieg; kamera z dopasowaniem przybliżenia.
 - Stworzenia widoczne na mapie: wędrują po strefach, część podchodzi do gracza („!”), rzadkie „Potężne okazy”,

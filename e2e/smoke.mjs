@@ -22,10 +22,20 @@ const scene = (fn) => page.evaluate(fn);
 try {
   await page.goto(BASE + '?debug');
   await page.getByRole('button', { name: 'Nowa gra' }).click();
-  await page.locator('.starter-card').nth(2).waitFor({ timeout: 30000 });
+  await page.locator('.starter-card h3').nth(2).waitFor({ timeout: 30000 });
   await page.waitForTimeout(1500);
   await shot('01-starter');
-  await page.locator('.starter-card').first().click();
+  // Najnowsza generacja: startery pobierane po otwarciu zakładki
+  await page.locator('.gen-grid button', { hasText: 'Gen. IX' }).click();
+  await page.locator('.starter-card h3', { hasText: 'Sprigatito' }).waitFor({ timeout: 30000 });
+  await page.waitForTimeout(1500);
+  await shot('01b-starter-gen9');
+  log('startery gen. IX', JSON.stringify(await page.locator('.starter-card h3').allTextContents()));
+  await page.locator('.gen-grid button', { hasText: 'Gen. V' }).first().click();
+  await page.locator('.starter-card h3', { hasText: 'Snivy' }).waitFor({ timeout: 30000 });
+  log('startery gen. V', JSON.stringify(await page.locator('.starter-card h3').allTextContents()));
+  await page.locator('.starter-card').nth(1).click();
+  log('przycisk', await page.getByRole('button', { name: /Ruszamy/ }).textContent());
   await page.getByRole('button', { name: /Ruszamy/ }).click();
   await page.locator('.dialog').waitFor({ timeout: 15000 });
   await shot('02a-intro');
