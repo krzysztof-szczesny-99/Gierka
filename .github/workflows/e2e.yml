@@ -6,6 +6,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   smoke:
     runs-on: ubuntu-latest
@@ -29,3 +32,12 @@ jobs:
         with:
           name: e2e-shots
           path: e2e-shots
+      # Zrzuty także na osobnej gałęzi (jeden commit, nadpisywany) — łatwo je obejrzeć w przeglądarce.
+      - name: Zrzuty na gałąź e2e-results
+        if: always()
+        run: |
+          cd e2e-shots
+          git init -q -b e2e-results
+          git add -A
+          git -c user.name="e2e-bot" -c user.email="e2e-bot@users.noreply.github.com" commit -q -m "Zrzuty E2E dla ${GITHUB_SHA::7}"
+          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" e2e-results

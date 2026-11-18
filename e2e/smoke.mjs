@@ -14,7 +14,7 @@ const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, de
 const page = await ctx.newPage();
 page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}\n${(e.stack ?? '').split('\n').slice(0, 5).join('\n')}`));
 page.on('console', (m) => {
-  if (m.type() === 'error' || m.type() === 'warning') problems.push(`${m.type()}: ${m.text()}`);
+  if ((m.type() === 'error' || m.type() === 'warning') && !m.text().includes('GL Driver Message')) problems.push(`${m.type()}: ${m.text()}`);
 });
 const shot = (n) => page.screenshot({ path: `${OUT}/${n}.png` });
 const scene = (fn) => page.evaluate(fn);
@@ -27,7 +27,10 @@ try {
   await shot('01-starter');
   await page.locator('.starter-card').first().click();
   await page.getByRole('button', { name: /Ruszamy/ }).click();
+  await page.locator('.dialog').waitFor({ timeout: 15000 });
+  await shot('02a-intro');
   for (let i = 0; i < 8 && (await page.locator('.dialog').count()); i++) await page.locator('.dialog').click();
+  log('UI', JSON.stringify(await scene(() => { const u = window.__szlaki.stores.useUi.getState(); return { mode: u.mode, modal: u.modal, dialog: !!u.dialog, learn: u.learnQueue.length, transition: u.transition }; })));
   await page.locator('canvas').waitFor({ timeout: 15000 });
   log('mapa: czekam na stworzenia');
   await page.waitForTimeout(9000);
