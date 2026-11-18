@@ -27,6 +27,7 @@ npm run dev          # serwer deweloperski: http://localhost:5173 (+ adres w sie
 | `npm run preview` | podgląd buildu: http://localhost:4173 (+ adres w sieci LAN) |
 | `npm run typecheck` | kontrola typów TypeScript |
 | `npm test` | testy silnika gry (Vitest) |
+| `node e2e/smoke.mjs <adres>` | test E2E w Chromium na ekranie telefonu (uruchamiany też automatycznie w GitHub Actions; zrzuty trafiają na gałąź `e2e-results`) |
 
 ## Test na telefonie w tej samej sieci Wi-Fi
 
