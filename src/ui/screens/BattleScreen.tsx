@@ -8,9 +8,10 @@ import { displayName } from '../../engine/creature';
 import { expProgress } from '../../engine/experience';
 import { effectiveness } from '../../engine/typeChart';
 import type { GrowthTable, PokemonData } from '../../engine/types';
-import { finishBattle } from '../../services/encounterService';
+import { cancelEncounter, finishBattle } from '../../services/encounterService';
 import { useBattle, type AnimKind, type ViewCreature } from '../../state/battleStore';
 import { useGame } from '../../state/gameStore';
+import { useUi } from '../../state/uiStore';
 import { CapsuleIcon, ExpBar, GenderMark, HpBar, StatusBadge, TypeBadges } from '../components/common';
 import { CreatureSprite } from '../components/CreatureSprite';
 
@@ -131,7 +132,31 @@ function InfoCard({ side, c, growth }: { side: SideIndex; c: ViewCreature; growt
   );
 }
 
+// Licznik zamontowanych ekranów walki — odróżnia faktyczne zamknięcie interfejsu od ponownego montowania.
+let mountedBattleScreens = 0;
+
+/**
+ * Zamknięcie interfejsu walki bez wyniku (np. zmiana ekranu lub błąd renderowania) kończy spotkanie centralnie:
+ * blokada zostaje zwolniona, a sterowanie wraca do mapy. Zwykłe zakończenie (finishBattle) przechodzi wcześniej
+ * do ENCOUNTER_ENDING, więc to zabezpieczenie wtedy nic nie robi.
+ */
+function useCloseGuard(): void {
+  useEffect(() => {
+    mountedBattleScreens += 1;
+    return () => {
+      mountedBattleScreens -= 1;
+      const id = useUi.getState().activeEncounterId;
+      if (!id) return;
+      setTimeout(() => {
+        const u = useUi.getState();
+        if (mountedBattleScreens === 0 && u.activeEncounterId === id && u.gameMode === 'BATTLE') cancelEncounter(id, 'ui-closed');
+      }, 0);
+    };
+  }, []);
+}
+
 export function BattleScreen() {
+  useCloseGuard();
   const view = useBattle((s) => s.view);
   const engine = useBattle((s) => s.engine);
   if (!view || !engine) return null;
@@ -188,10 +213,17 @@ function Commands() {
   const phase = useBattle((s) => s.phase);
   const menu = useBattle((s) => s.menu);
   const setMenu = useBattle((s) => s.setMenu);
+  const ending = useUi((s) => s.gameMode === 'ENCOUNTER_ENDING');
 
   if (phase === 'ended') {
     return (
-      <button className="btn btn-primary btn-block" style={{ minHeight: 58 }} onClick={() => void finishBattle()}>
+      <button
+        className="btn btn-primary btn-block"
+        style={{ minHeight: 58 }}
+        disabled={ending}
+        aria-busy={ending}
+        onClick={() => void finishBattle()}
+      >
         Dalej
       </button>
     );

@@ -69,42 +69,62 @@ try {
   log('po klawiaturze', afterKeys);
   if (afterKeys[1] <= info.player[1]) problems.push('Klawiatura: postać się nie ruszyła');
 
-  // Pad dotykowy: przytrzymanie w prawo
-  const pad = await page.locator('.dpad').boundingBox();
-  await page.mouse.move(pad.x + pad.width / 2 + 45, pad.y + pad.height / 2);
+  // Joystick ekranowy: przytrzymanie w prawo
+  const joy = await page.locator('.joystick').boundingBox();
+  await page.mouse.move(joy.x + joy.width / 2 + 45, joy.y + joy.height / 2);
   await page.mouse.down();
   await page.waitForTimeout(700);
   await page.mouse.up();
   await page.waitForTimeout(300);
   const afterPad = await scene(() => { const sc = window.__szlaki.game.scene.getScene('Overworld'); return [sc.tx, sc.ty]; });
-  log('po padzie', afterPad);
-  if (afterPad[0] <= afterKeys[0]) problems.push('Pad: postać się nie ruszyła w prawo');
+  log('po joysticku', afterPad);
+  if (afterPad[0] <= afterKeys[0]) problems.push('Joystick: postać się nie ruszyła w prawo');
 
-  // Dotknięcie mapy: cel 2 kafelki w dół
+  // Dotknięcie mapy: tap-to-move jest wyłączony — postać zostaje na miejscu
   const target = await scene(() => {
     const sc = window.__szlaki.game.scene.getScene('Overworld');
     const cam = sc.cameras.main;
     const tx = sc.tx, ty = sc.ty + 2;
     const sx = (tx * 16 + 8 - cam.worldView.x) * cam.zoom;
     const sy = (ty * 16 + 8 - cam.worldView.y) * cam.zoom;
-    return { tx, ty, sx, sy, walk: sc.isWalkable(tx, ty) };
+    return { tx, ty, sx, sy };
   });
   await page.mouse.click(target.sx, target.sy);
   await page.waitForTimeout(1200);
   const afterTap = await scene(() => { const sc = window.__szlaki.game.scene.getScene('Overworld'); return [sc.tx, sc.ty]; });
   log('dotknięcie', JSON.stringify(target), '→', afterTap);
-  if (target.walk && (afterTap[0] !== target.tx || afterTap[1] !== target.ty)) problems.push('Dotknięcie mapy: postać nie doszła do celu');
+  if (afterTap[0] !== afterPad[0] || afterTap[1] !== afterPad[1]) problems.push('Dotknięcie mapy poruszyło postać (tap-to-move powinien być wyłączony)');
   await shot('03-moved');
 
-  // Spotkanie: najbliższe stworzenie
+  // Spotkanie: realny kontakt — stworzenie obok gracza, gracz wchodzi w nie joystickiem
   const started = await scene(() => {
     const sc = window.__szlaki.game.scene.getScene('Overworld');
-    const a = [...sc.actors].sort((p, q) => Math.abs(p.tx - sc.tx) + Math.abs(p.ty - sc.ty) - (Math.abs(q.tx - sc.tx) + Math.abs(q.ty - sc.ty)))[0];
+    sc.updateActors = () => {}; // na czas ustawienia scenariusza stworzenia stoją
+    const D = { right: [1, 0], left: [-1, 0], down: [0, 1], up: [0, -1] };
+    const a = sc.actors.find((x) => !x.removed && !x.engaged);
     if (!a) return null;
-    sc.startEncounter(a);
-    return a.spawn.creature.name;
+    for (const [d, [dx, dy]] of Object.entries(D)) {
+      const x = sc.tx + dx, y = sc.ty + dy;
+      const fol = sc.followerTile && sc.followerTile.x === x && sc.followerTile.y === y;
+      if (sc.isWalkable(x, y) && !sc.actorAt(x, y) && !fol) {
+        sc.tweens.killTweensOf(a.container);
+        a.tx = x; a.ty = y; a.moving = false;
+        a.container.setPosition(x * 16 + 8, (y + 1) * 16);
+        return { name: a.spawn.creature.name, dir: d };
+      }
+    }
+    return null;
   });
-  log('spotkanie z', started);
+  log('spotkanie z', JSON.stringify(started));
+  if (started) {
+    const off = { up: [0, -45], down: [0, 45], left: [-45, 0], right: [45, 0] }[started.dir];
+    const jb = await page.locator('.joystick').boundingBox();
+    await page.mouse.move(jb.x + jb.width / 2 + off[0], jb.y + jb.height / 2 + off[1]);
+    await page.mouse.down();
+    await page.waitForTimeout(500);
+    await page.mouse.up();
+    await scene(() => { delete window.__szlaki.game.scene.getScene('Overworld').updateActors; });
+  }
   if (started) {
     await page.locator('.battle').waitFor({ timeout: 20000 });
     await page.waitForTimeout(2500);
@@ -134,9 +154,9 @@ try {
     for (let i = 0; i < 8 && (await page.locator('.dialog').count()); i++) await page.locator('.dialog').click();
     if (await page.getByRole('button', { name: /Nie ucz/ }).count()) await page.getByRole('button', { name: /Nie ucz/ }).click();
     await page.waitForTimeout(1500);
-    const back = await scene(() => { const sc = window.__szlaki.game.scene.getScene('Overworld'); return { lock: sc.encounterLock, loop: window.__szlaki.game.loop.running, actors: sc.actors.length }; });
+    const back = await scene(() => { const sc = window.__szlaki.game.scene.getScene('Overworld'); const u = window.__szlaki.stores.useUi.getState(); return { gameMode: u.gameMode, inputLocked: u.inputLocked, loop: window.__szlaki.game.loop.running, actors: sc.actors.length }; });
     log('po walce', JSON.stringify(back));
-    if (back.lock || !back.loop) problems.push('Po walce mapa nie wróciła do działania');
+    if (back.gameMode !== 'EXPLORATION' || back.inputLocked || !back.loop) problems.push('Po walce mapa nie wróciła do działania');
     await shot('08-back-on-map');
     await page.keyboard.down('ArrowUp');
     await page.waitForTimeout(400);

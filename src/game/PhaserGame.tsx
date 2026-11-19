@@ -28,7 +28,25 @@ export function PhaserGame() {
       scene: [BootScene, OverworldScene],
     });
     expose('game', game);
+
+    // Phaser 3.90 po zmianie orientacji odczytuje rozmiar rodzica, zanim przeglądarka przeliczy układ,
+    // i zostaje o jeden obrót „w tyle”. Obserwujemy rzeczywisty rozmiar kontenera i wymuszamy przeliczenie.
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => {
+        if (!game.isBooted) return;
+        const r = parent.getBoundingClientRect();
+        if (r.width < 1 || r.height < 1) return;
+        if (Math.abs(r.width - game.scale.width) >= 1 || Math.abs(r.height - game.scale.height) >= 1) {
+          game.scale.getParentBounds();
+          game.scale.refresh();
+        }
+      });
+      ro.observe(parent);
+    }
+
     return () => {
+      ro?.disconnect();
       game.destroy(true);
     };
   }, []);

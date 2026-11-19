@@ -3,12 +3,17 @@ import { registerSW } from 'virtual:pwa-register';
 import App from './App';
 import { expose } from './debug';
 import { bus } from './game/eventBus';
+import { installInputGuards, joystick, virtualInput } from './game/input';
 import { useBattle } from './state/battleStore';
 import { useGame } from './state/gameStore';
 import { useUi, type BeforeInstallPromptEvent } from './state/uiStore';
 import './ui/styles/global.css';
 
 expose('stores', { useGame, useUi, useBattle, bus });
+expose('input', { joystick, virtualInput });
+
+// Joystick zatrzymuje się po utracie fokusu, ukryciu/zamknięciu strony i obrocie ekranu.
+installInputGuards(window, document);
 
 // Zdarzenie instalacji może przyjść bardzo wcześnie — nasłuchujemy przed startem Reacta.
 window.addEventListener('beforeinstallprompt', (e) => {

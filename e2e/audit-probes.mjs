@@ -1,5 +1,7 @@
 // Sondy audytowe Sprintu 0: mierzą rzeczywiste zachowanie gry na prawdziwym buildzie (Phaser + PokéAPI).
 // Nie zmieniają kodu gry; korzystają z trybu ?debug. Wynik każdej sondy: OK / PROBLEM / INFO / BŁĄD SONDY.
+// Od Sprintu 1 sondy są testem regresji: każdy PROBLEM lub BŁĄD SONDY kończy skrypt kodem ≠ 0.
+// (Sprint 1: pad → joystick, blokada spotkań w useUi zamiast pola sceny.)
 // Użycie: node e2e/audit-probes.mjs http://localhost:4173/
 import { chromium } from 'playwright';
 
@@ -41,7 +43,7 @@ async function closeDialogs() {
   const skipLearn = page.getByRole('button', { name: /Nie ucz/ });
   if (await skipLearn.count()) await skipLearn.click();
 }
-async function waitHud() { await page.locator('.dpad').waitFor({ timeout: 15000 }); }
+async function waitHud() { await page.locator('.joystick').waitFor({ timeout: 15000 }); }
 async function waitActors(n) {
   await page.waitForFunction((n) => { const sc = window.__szlaki?.game?.scene?.getScene('Overworld'); return !!sc && Array.isArray(sc.actors) && sc.actors.filter((a) => !a.removed).length >= n; }, n, { timeout: 30000 });
 }
@@ -59,11 +61,13 @@ function freeDir() {
   });
 }
 async function dpadPoint(dir) {
-  const b = await page.locator('.dpad').boundingBox();
+  const b = await page.locator('.joystick').boundingBox();
   const o = { up: [0, -45], down: [0, 45], left: [-45, 0], right: [45, 0] }[dir];
   return [b.x + b.width / 2 + o[0], b.y + b.height / 2 + o[1]];
 }
 async function startNearestEncounter() {
+  // Po poprzednim spotkaniu obowiązuje krótkie odnowienie — czekamy, aż minie.
+  await page.waitForFunction(() => { const u = window.__szlaki.stores.useUi.getState(); return u.gameMode === 'EXPLORATION' && performance.now() >= u.encounterCooldown; }, null, { timeout: 15000 });
   return S(() => {
     const sc = window.__szlaki.game.scene.getScene('Overworld');
     const d = (a) => Math.abs(a.tx - sc.tx) + Math.abs(a.ty - sc.ty);
@@ -189,7 +193,7 @@ try {
   await page.mouse.down();
   await idle(450);
   const moving = await pos();
-  await S(() => document.querySelector('.dpad').dispatchEvent(new PointerEvent('pointercancel', { pointerId: 1, bubbles: true, pointerType: 'mouse' })));
+  await S(() => document.querySelector('.joystick').dispatchEvent(new PointerEvent('pointercancel', { pointerId: 1, bubbles: true, pointerType: 'mouse' })));
   await idle(350);
   const a = await pos();
   await idle(900);
@@ -301,6 +305,7 @@ try {
   phase = 'lock';
   await waitHud();
   await waitActors(2);
+  await page.waitForFunction(() => { const u = window.__szlaki.stores.useUi.getState(); return u.gameMode === 'EXPLORATION' && performance.now() >= u.encounterCooldown; }, null, { timeout: 15000 });
   await S(() => { window.__enc = 0; window.__szlaki.stores.bus.on('encounter', () => { window.__enc += 1; }); });
   const before = await pos();
   const started = await S(() => {
@@ -310,7 +315,7 @@ try {
     sc.startEncounter(a1);
     sc.startEncounter(a2); // ta sama klatka
     const u = window.__szlaki.stores.useUi.getState();
-    return { a1: a1.id, a2: a2.id, lock: sc.encounterLock, transition: u.transition, encounters: window.__enc };
+    return { a1: a1.id, a2: a2.id, lock: u.activeEncounterId, gameMode: u.gameMode, transition: u.transition, encounters: window.__enc };
   });
   record('P6a', 'Dwa stworzenia w tej samej klatce uruchamiają tylko jedno spotkanie', started.encounters === 1 ? 'OK' : 'PROBLEM', started);
 
@@ -325,11 +330,12 @@ try {
     const sc = window.__szlaki.game.scene.getScene('Overworld');
     const other = sc.actors.find((a) => a.id === a2);
     const ui = st.useUi.getState();
-    const ctxState = { mode: ui.mode, transition: ui.transition, lockPrzed: sc.encounterLock };
+    const ctxState = { mode: ui.mode, transition: ui.transition, lockPrzed: ui.activeEncounterId };
     if (other) st.bus.emit('encounter', { actorId: other.id, spawn: other.spawn });
-    return { ...ctxState, lockPoObcymAnulowaniu: sc.encounterLock, pierwszaWalkaNadalTrwa: st.useUi.getState().transition || st.useUi.getState().mode === 'battle' };
+    const after = st.useUi.getState();
+    return { ...ctxState, lockPoObcymAnulowaniu: after.activeEncounterId, tenSam: after.activeEncounterId === ctxState.lockPrzed, pierwszaWalkaNadalTrwa: after.transition || after.mode === 'battle' };
   }, started.a2);
-  record('P6c', 'Anulowanie innego spotkania nie zwalnia blokady trwającego spotkania', foreign.lockPoObcymAnulowaniu ? 'OK' : 'PROBLEM', foreign);
+  record('P6c', 'Anulowanie innego spotkania nie zwalnia blokady trwającego spotkania', foreign.lockPoObcymAnulowaniu && foreign.tenSam ? 'OK' : 'PROBLEM', foreign);
 
   await page.locator('.battle').waitFor({ timeout: 20000 });
   await idle(1500);
@@ -390,7 +396,8 @@ try {
   const st = await S((id) => {
     const sc = window.__szlaki.game.scene.getScene('Overworld');
     const a = sc.actors.find((x) => x.id === id);
-    return { aktorIstnieje: !!a, engaged: a?.engaged, aggressive: a?.aggressive, cooldownMs: a ? Math.round(a.cooldownUntil - sc.time.now) : null, lock: sc.encounterLock, petlaDziala: window.__szlaki.game.loop.running, noweSpotkaniaW2_5s: window.__enc };
+    const u = window.__szlaki.stores.useUi.getState();
+    return { aktorIstnieje: !!a, engaged: a?.engaged, aggressive: a?.aggressive, cooldownMs: a ? Math.round(a.cooldownUntil - sc.time.now) : null, lock: u.inputLocked || u.gameMode !== 'EXPLORATION', petlaDziala: window.__szlaki.game.loop.running, noweSpotkaniaW2_5s: window.__enc };
   }, e?.id);
   const ok = outcome !== 'fled' || (st.aktorIstnieje && !st.engaged && !st.lock && st.petlaDziala && st.noweSpotkaniaW2_5s === 0);
   record('P8', 'Ucieczka: powrót na mapę, stworzenie zostaje z odnowieniem, brak natychmiastowego ponownego spotkania', ok ? 'OK' : 'PROBLEM', { przeciwnik: e, wynik: outcome, ...st });
@@ -479,3 +486,5 @@ record('P14', 'Błędy i ostrzeżenia konsoli (bez komunikatów sterownika GL)',
 await browser.close();
 console.log('\n=== PODSUMOWANIE SOND ===');
 for (const r of results) console.log(`${r.id.padEnd(4)} ${r.verdict.padEnd(10)} ${r.title}`);
+const bad = results.filter((r) => r.verdict === 'PROBLEM' || r.verdict === 'BŁĄD SONDY');
+process.exitCode = bad.length ? 1 : 0;

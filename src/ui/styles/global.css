@@ -414,7 +414,7 @@ input {
 .controls > * {
   pointer-events: auto;
 }
-.dpad {
+.joystick {
   position: relative;
   width: 148px;
   height: 148px;
@@ -422,49 +422,59 @@ input {
   background: rgba(12, 22, 18, 0.55);
   border: 1px solid rgba(255, 255, 255, 0.12);
   touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
-.dpad .arm {
+.joystick.active {
+  border-color: rgba(79, 209, 165, 0.45);
+}
+.joystick .arrow {
   position: absolute;
-  width: 46px;
-  height: 46px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.12);
+  width: 22px;
+  height: 22px;
   display: grid;
   place-items: center;
-  font-size: 18px;
-  color: rgba(255, 255, 255, 0.75);
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.35);
   pointer-events: none;
-  transition: background 0.08s ease;
+  transition: color 0.08s ease;
 }
-.dpad .arm.on {
-  background: rgba(79, 209, 165, 0.55);
-  color: #fff;
+.joystick .arrow.on {
+  color: #4fd1a5;
 }
-.dpad .up {
-  left: 51px;
-  top: 6px;
+.joystick .up {
+  left: 63px;
+  top: 4px;
 }
-.dpad .down {
-  left: 51px;
-  bottom: 6px;
+.joystick .down {
+  left: 63px;
+  bottom: 4px;
 }
-.dpad .left {
-  top: 51px;
-  left: 6px;
+.joystick .left {
+  top: 63px;
+  left: 4px;
 }
-.dpad .right {
-  top: 51px;
-  right: 6px;
+.joystick .right {
+  top: 63px;
+  right: 4px;
 }
-.dpad .hub {
+.joystick .knob {
   position: absolute;
-  left: 60px;
-  top: 60px;
-  width: 28px;
-  height: 28px;
+  left: 46px;
+  top: 46px;
+  width: 56px;
+  height: 56px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
   pointer-events: none;
+  will-change: transform;
+}
+.joystick.active .knob {
+  background: rgba(79, 209, 165, 0.55);
+  border-color: rgba(255, 255, 255, 0.5);
 }
 .ab {
   display: flex;
