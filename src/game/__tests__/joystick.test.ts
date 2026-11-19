@@ -89,6 +89,12 @@ describe('joystick: prędkość', () => {
     expect(stepDurationMs(true)).toBe(MOVE_TIMING.runMs);
   });
 
+  it('chód jest o połowę wolniejszy niż pierwotnie (170 ms → 340 ms na kafelek), bieg szybszy od chodu', () => {
+    expect(stepDurationMs(false)).toBe(340);
+    expect(1000 / stepDurationMs(false)).toBeCloseTo((1000 / 170) / 2, 6);
+    expect(stepDurationMs(true)).toBeLessThan(stepDurationMs(false));
+  });
+
   it('maksymalna prędkość jest limitem dla każdego trybu', () => {
     const maxTps = MOVE_TIMING.maxTilesPerSecond;
     expect(1000 / stepDurationMs(true)).toBeLessThanOrEqual(maxTps + 1e-9);

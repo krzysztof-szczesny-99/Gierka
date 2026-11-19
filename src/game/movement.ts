@@ -21,7 +21,8 @@ export const DIRS: Record<Dir, Point> = {
  * nie przyspiesza postaci (kierunek jest kwantowany, droga i czas kroku są takie same jak w osi).
  */
 export const MOVE_TIMING = {
-  walkMs: 170,
+  /** Chód: 340 ms na kafelek (~2,9 kafelka/s) — o połowę wolniej niż pierwotne 170 ms. */
+  walkMs: 340,
   runMs: 95,
   /** Maksymalna prędkość (kafelki/s) — górny limit niezależnie od trybu i wejścia. */
   maxTilesPerSecond: 1000 / 95,
