@@ -1,0 +1,72 @@
+# Kontrola jakości gałęzi roboczych (sprinty) — BEZ publikacji.
+# Kolejność: zależności → kontrola typów → testy jednostkowe → build → E2E (smoke, regresja, sondy) → konsola.
+# Każdy krok blokuje: błąd w którymkolwiek oznacza czerwony wynik.
+name: CI (gałęzie robocze)
+
+on:
+  push:
+    branches-ignore: [main, e2e-results, 'e2e-results-*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Instalacja zależności
+        run: npm install --no-audit --no-fund
+
+      - name: Wersje zainstalowanych zależności
+        run: npm ls --depth=0 || true
+
+      - name: Kontrola typów
+        run: npm run typecheck
+
+      - name: Testy jednostkowe
+        run: npm test
+
+      - id: build
+        name: Build produkcyjny
+        run: npm run build
+
+      - name: Przeglądarka do E2E
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1
+          npx playwright install --with-deps chromium
+
+      - name: Serwer podglądu buildu
+        run: |
+          nohup npx vite preview --port 4173 --strictPort > preview.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:4173/ >/dev/null && break; sleep 1; done
+          curl -sf http://localhost:4173/ >/dev/null
+
+      - name: Test E2E (smoke)
+        run: node e2e/smoke.mjs http://localhost:4173/
+
+      - name: Test E2E (regresja Sprintu 1)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: node e2e/regression.mjs http://localhost:4173/
+
+      - name: Sondy audytowe (regresja Sprintu 0)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: node e2e/audit-probes.mjs http://localhost:4173/
+
+      # Zrzuty ekranu na osobnej gałęzi (jeden commit, nadpisywany) — do obejrzenia bez pobierania artefaktów.
+      - name: Zrzuty na gałąź e2e-results-ci
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          cd e2e-shots
+          git init -q -b e2e-results-ci
+          git add -A
+          git -c user.name="e2e-bot" -c user.email="e2e-bot@users.noreply.github.com" commit -q -m "Zrzuty E2E (CI) dla ${GITHUB_SHA::7}"
+          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" e2e-results-ci

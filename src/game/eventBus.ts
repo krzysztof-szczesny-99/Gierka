@@ -6,9 +6,11 @@ import type { WildSpawn } from '../services/creatureService';
 export type EncounterOutcome = 'win' | 'lose' | 'fled' | 'caught' | 'cancel';
 
 export interface BusEvents {
-  encounter: { actorId: string; spawn: WildSpawn };
+  /** Wysyłane wyłącznie po przejęciu centralnej blokady (useUi.tryStartEncounter) — z jej identyfikatorem. */
+  encounter: { encounterId: string; actorId: string; spawn: WildSpawn };
   'battle-start': undefined;
-  'battle-end': { actorId: string | null; outcome: EncounterOutcome };
+  /** Wynik spotkania dla obiektu źródłowego na mapie (usunięcie stworzenia albo odnowienie). */
+  'battle-end': { encounterId: string; actorId: string | null; outcome: EncounterOutcome };
   dialog: { lines: string[] };
   door: { kind: 'care' | 'shop' };
   teleport: { x: number; y: number; facing: Dir };

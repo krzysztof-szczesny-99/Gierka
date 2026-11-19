@@ -17,6 +17,11 @@ export interface EncounterTable {
   entries: EncounterEntry[];
 }
 
+/** Po każdym zakończonym spotkaniu (także anulowanym) nowe nie może zacząć się wcześniej niż po tym czasie. */
+export const ENCOUNTER_COOLDOWN_MS = 1500;
+/** Stworzenie, przed którym uciekliśmy (lub którego spotkanie anulowano), przez ten czas nie goni gracza. */
+export const ACTOR_RETREAT_COOLDOWN_MS = 6000;
+
 export const ENCOUNTER_TABLES: Record<string, EncounterTable> = {
   meadow: {
     id: 'meadow',

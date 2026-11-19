@@ -1,4 +1,5 @@
 # Buduje grę i publikuje ją na GitHub Pages przy każdym wypchnięciu na gałąź main.
+# Publikacja następuje WYŁĄCZNIE po przejściu: kontroli typów, testów jednostkowych, buildu i testów E2E.
 # Jednorazowo: Settings → Pages → Build and deployment → Source: „GitHub Actions”.
 name: Publikacja na GitHub Pages
 
@@ -19,6 +20,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -32,14 +34,28 @@ jobs:
       - name: Instalacja zależności
         run: npm install --no-audit --no-fund
 
-      - name: Kontrola typów (informacyjnie, nie blokuje publikacji)
+      - name: Kontrola typów
         run: npm run typecheck
-        continue-on-error: true
 
-      - name: Testy silnika gry
+      - name: Testy jednostkowe
         run: npm test
 
-      - name: Build (ścieżka bazowa repozytorium)
+      - name: Build do testów E2E
+        run: npm run build
+
+      - name: Przeglądarka do E2E
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1
+          npx playwright install --with-deps chromium
+
+      - name: Testy E2E (smoke + regresja)
+        run: |
+          nohup npx vite preview --port 4173 --strictPort > preview.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:4173/ >/dev/null && break; sleep 1; done
+          node e2e/smoke.mjs http://localhost:4173/
+          node e2e/regression.mjs http://localhost:4173/
+
+      - name: Build do publikacji (ścieżka bazowa repozytorium)
         run: npx vite build --base="${{ steps.pages.outputs.base_path }}/"
 
       - uses: actions/upload-pages-artifact@v3

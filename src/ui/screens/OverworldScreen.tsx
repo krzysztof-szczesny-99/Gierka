@@ -5,7 +5,7 @@ import { MAPS, TEST_MAP } from '../../game/maps/testMap';
 import { PhaserGame } from '../../game/PhaserGame';
 import { useGame } from '../../state/gameStore';
 import { useUi, type ModalId } from '../../state/uiStore';
-import { ActionButtons, DPad } from '../components/Controls';
+import { ActionButtons, Joystick } from '../components/Controls';
 
 /** Mapa (Phaser) + nakładka HUD. Phaser pozostaje zamontowany także podczas walki. */
 export function OverworldScreen() {
@@ -43,7 +43,10 @@ function Hud() {
   const zone = useZoneName();
   const money = useGame((s) => s.player.money);
   const online = useUi((s) => s.online);
-  const blocked = useUi((s) => s.modal !== null || s.dialog !== null || s.learnQueue.length > 0 || s.transition);
+  const blocked = useUi(
+    (s) =>
+      s.gameMode !== 'EXPLORATION' || s.inputLocked || s.modal !== null || s.dialog !== null || s.learnQueue.length > 0 || s.transition,
+  );
   const claimable = useClaimableQuests();
   const open = (m: ModalId) => useUi.getState().openModal(m);
 
@@ -68,7 +71,7 @@ function Hud() {
             <button onClick={() => open('options')}>☰</button>
           </nav>
           <div className="controls">
-            <DPad />
+            <Joystick />
             <ActionButtons />
           </div>
         </>

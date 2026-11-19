@@ -1,72 +1,75 @@
-// Sterowanie dotykowe: pad kierunkowy (działa jak drążek — wystarczy przesuwać kciuk) oraz przyciski A/B.
+// Sterowanie dotykowe: joystick ekranowy (rozwinięcie dawnego pada kierunkowego) oraz przyciski A/B.
+// Komponent tylko przekazuje położenie palca do czystej logiki w game/input.ts (normalizacja, martwa strefa,
+// histereza kierunku, zatrzymanie po puszczeniu, pointercancel). Utratę fokusu, ukrycie strony i obrót
+// ekranu obsługują strażnicy globalni (installInputGuards w main.tsx).
 
 import { useEffect, useRef, useState, type PointerEvent } from 'react';
 import type { Dir } from '../../engine/types';
-import { queueAction, virtualInput } from '../../game/input';
+import {
+  joystick,
+  joystickDown,
+  joystickMove,
+  joystickUp,
+  onJoystickChange,
+  queueAction,
+  releaseInput,
+  virtualInput,
+  type JoystickVector,
+} from '../../game/input';
 
 const ARROWS: Record<Dir, string> = { up: '▲', down: '▼', left: '◀', right: '▶' };
-const DEAD_ZONE = 14;
 
-export function DPad() {
+export function Joystick() {
   const ref = useRef<HTMLDivElement>(null);
-  const pointer = useRef<number | null>(null);
-  const [dir, setDir] = useState<Dir | null>(null);
+  const [v, setV] = useState<JoystickVector>(joystick.vector);
 
-  useEffect(
-    () => () => {
-      virtualInput.dir = null;
-    },
-    [],
-  );
+  useEffect(() => {
+    const off = onJoystickChange(setV);
+    return () => {
+      off();
+      releaseInput('unmount');
+    };
+  }, []);
 
-  const update = (e: PointerEvent<HTMLDivElement>) => {
-    const el = ref.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const dx = e.clientX - (r.left + r.width / 2);
-    const dy = e.clientY - (r.top + r.height / 2);
-    let d: Dir | null = null;
-    if (Math.hypot(dx, dy) > DEAD_ZONE) {
-      d = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : dy > 0 ? 'down' : 'up';
-    }
-    virtualInput.dir = d;
-    setDir(d);
-  };
-
-  const end = (e: PointerEvent<HTMLDivElement>) => {
-    if (e.pointerId !== pointer.current) return;
-    pointer.current = null;
-    virtualInput.dir = null;
-    setDir(null);
+  const offset = (e: PointerEvent<HTMLDivElement>): [number, number] => {
+    const r = (ref.current ?? e.currentTarget).getBoundingClientRect();
+    return [e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2)];
   };
 
   return (
     <div
       ref={ref}
-      className="dpad"
+      className={`joystick ${v.dir ? 'active' : ''}`}
       role="group"
-      aria-label="Kierunki ruchu"
+      aria-label="Joystick ruchu"
+      data-dir={v.dir ?? ''}
       onPointerDown={(e) => {
         e.preventDefault();
-        if (pointer.current !== null) return;
-        pointer.current = e.pointerId;
-        e.currentTarget.setPointerCapture(e.pointerId);
-        update(e);
+        const [dx, dy] = offset(e);
+        if (joystickDown(e.pointerId, dx, dy)) {
+          try {
+            e.currentTarget.setPointerCapture(e.pointerId);
+          } catch {
+            /* wskaźnik już nieaktywny */
+          }
+        }
       }}
       onPointerMove={(e) => {
-        if (e.pointerId === pointer.current) update(e);
+        if (e.pointerId !== joystick.pointerId) return;
+        const [dx, dy] = offset(e);
+        joystickMove(e.pointerId, dx, dy);
       }}
-      onPointerUp={end}
-      onPointerCancel={end}
-      onLostPointerCapture={end}
+      onPointerUp={(e) => joystickUp(e.pointerId, 'pointerup')}
+      onPointerCancel={(e) => joystickUp(e.pointerId, 'pointercancel')}
+      onLostPointerCapture={(e) => joystickUp(e.pointerId, 'pointercancel')}
       onContextMenu={(e) => e.preventDefault()}
     >
       {(Object.keys(ARROWS) as Dir[]).map((d) => (
-        <div key={d} className={`arm ${d} ${dir === d ? 'on' : ''}`}>
+        <div key={d} className={`arrow ${d} ${v.dir === d ? 'on' : ''}`} aria-hidden>
           {ARROWS[d]}
         </div>
       ))}
-      <div className="hub" />
+      <div className="knob" style={{ transform: `translate(${v.knobX}px, ${v.knobY}px)` }} />
     </div>
   );
 }
