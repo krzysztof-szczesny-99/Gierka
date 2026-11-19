@@ -128,15 +128,36 @@ try {
     await idle(300);
     await page.locator('.modal-close').click();
   };
+  // Odradzanie stworzeń wstrzymane na czas pomiaru (tylko w teście), aby oddzielić zapytania menu od zapytań spawnów.
+  await S(() => { const sc = window.__szlaki.game.scene.getScene('Overworld'); sc.__origSpawn = sc.maintainSpawns; sc.maintainSpawns = () => {}; });
+  await idle(2500);
   phase = 'menus-1';
   await openClose();
   phase = 'menus-2';
   await openClose();
+  const spawnsDuringModal = await S(() => { const sc = window.__szlaki.game.scene.getScene('Overworld'); sc.maintainSpawns = sc.__origSpawn; return true; });
   const first = api.filter((r) => r.phase === 'menus-1').map((r) => r.url);
   const second = api.filter((r) => r.phase === 'menus-2').map((r) => r.url);
-  record('P1', 'Ponowne otwarcie Drużyny/Torby/Atlasu/Dziennika nie wysyła zapytań do PokéAPI', second.length === 0 ? 'OK' : 'PROBLEM', { pierwszeOtwarcie: first, drugieOtwarcie: second });
+  record('P1', 'Ponowne otwarcie Drużyny/Torby/Atlasu/Dziennika nie wysyła zapytań do PokéAPI (odradzanie wstrzymane)', second.length === 0 ? 'OK' : 'PROBLEM', { pierwszeOtwarcie: first, drugieOtwarcie: second, przywrocono: spawnsDuringModal });
 } catch (e) {
   record('P1', 'Zapytania przy menu', 'BŁĄD SONDY', String(e).slice(0, 300));
+}
+
+// ───────────── 1b. Odradzanie i ruch stworzeń przy otwartym oknie ─────────────
+try {
+  phase = 'modal-spawn';
+  const before = await S(() => { const sc = window.__szlaki.game.scene.getScene('Overworld'); return { n: sc.actors.length, ids: sc.actors.map((a) => a.id), pos: sc.actors.map((a) => `${a.tx},${a.ty}`) }; });
+  await S(() => { const sc = window.__szlaki.game.scene.getScene('Overworld'); const a = sc.actors[0]; if (a) sc.removeActor(a); });
+  await page.locator('.hud-menu button', { hasText: 'Atlas' }).click();
+  await page.locator('.modal').waitFor();
+  await idle(6000);
+  const during = await S(() => { const sc = window.__szlaki.game.scene.getScene('Overworld'); return { n: sc.actors.length, ids: sc.actors.map((a) => a.id), pos: sc.actors.map((a) => `${a.tx},${a.ty}`) }; });
+  await page.locator('.modal-close').click();
+  const moved = during.ids.filter((id, i) => before.ids.includes(id) && before.pos[before.ids.indexOf(id)] !== during.pos[i]).length;
+  const newOnes = during.ids.filter((id) => !before.ids.includes(id)).length;
+  record('P15', 'Przy otwartym oknie: stworzenia stoją, a odradzanie działa dalej', 'INFO', { przed: before.n, poUsunieciuJednegoIOknie6s: during.n, noweStworzenia: newOnes, przesunieteStworzenia: moved });
+} catch (e) {
+  record('P15', 'Odradzanie przy oknie', 'BŁĄD SONDY', String(e).slice(0, 300));
 }
 
 // ───────────── 2. Chodzenie: zapytania na krok ─────────────
@@ -235,6 +256,23 @@ try {
   record('P5', 'Obrót ekranu: kamera dopasowana, ruch zatrzymuje się po puszczeniu pada', okCam && same(a, b) ? 'OK' : 'PROBLEM', { kierunek: d, kameraPoziomo: cam, kameraPionowo: cam2, poPuszczeniu: a, po900ms: b });
 } catch (e) {
   record('P5', 'Orientacja', 'BŁĄD SONDY', String(e).slice(0, 300));
+}
+
+// ───────────── 5b. Rozmiar kamery w czasie po obrocie (bez wejścia) ─────────────
+try {
+  phase = 'orientation-2';
+  const snap = () => S(() => { const g = window.__szlaki.game; const c = g.scene.getScene('Overworld').cameras.main; return { kamera: [c.width, c.height], zoom: c.zoom, gra: [g.scale.width, g.scale.height], canvasCss: [g.canvas.clientWidth, g.canvas.clientHeight], okno: [innerWidth, innerHeight] }; });
+  const series = [];
+  await page.setViewportSize({ width: 844, height: 390 });
+  for (const t of [100, 400, 900, 1600]) { await idle(t - (series.length ? [100, 400, 900, 1600][series.length - 1] : 0)); series.push({ t, ...(await snap()) }); }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await idle(1600);
+  series.push({ t: 'pion+1600', ...(await snap()) });
+  const last = series[3];
+  const ok = last.kamera[0] === 844 && last.kamera[1] === 390 && series[4].kamera[0] === 390 && series[4].kamera[1] === 844;
+  record('P5b', 'Rozmiar kamery po obrocie (pomiar w czasie, bez trzymania pada)', ok ? 'OK' : 'PROBLEM', series);
+} catch (e) {
+  record('P5b', 'Kamera po obrocie', 'BŁĄD SONDY', String(e).slice(0, 300));
 }
 
 // ───────────── 6. Blokada spotkań: dwa stworzenia naraz, ruch w przejściu, obce anulowanie ─────────────
