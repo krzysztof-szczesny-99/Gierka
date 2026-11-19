@@ -567,6 +567,15 @@ try {
 try {
   if (!t8) throw new Error('brak walki ze Strażnikiem z T8');
   const foe = await enemy();
+  // Scenariusz ucieczki: starter (poz. 5) jest szybszy od Strażnika, więc ucieczka się udaje (jak przy osłabieniu przeciwnika w T10).
+  await page.waitForFunction(() => window.__szlaki.stores.useBattle.getState().phase === 'choose', null, { timeout: 20000 });
+  await S(() => {
+    const B = window.__szlaki.stores.useBattle;
+    const engine = structuredClone(B.getState().engine);
+    const side = engine.sides[0];
+    side.party[side.active[0]].stats.spe = 999;
+    B.setState({ engine });
+  });
   const outcome = await fleeToEnd();
   const before = await stats();
   await page.getByRole('button', { name: 'Dalej' }).click();
@@ -582,7 +591,7 @@ try {
   await idle(300);
   const ev = await encounters();
   const st = await ui();
-  const ok = outcome === 'fled' ? after.fled - before.fled === 1 && g && same(g.at, [36, 28]) && g.engaged === false && ev.length === 0 && st.gameMode === 'EXPLORATION' : 'INFO';
+  const ok = outcome === 'fled' && after.fled - before.fled === 1 && g && same(g.at, [36, 28]) && g.engaged === false && ev.length === 0 && st.gameMode === 'EXPLORATION';
   record('T9', 'Strażnik po ucieczce zostaje na miejscu; w odnowieniu kontakt nie startuje walki', ok, { przeciwnik: foe, wynik: outcome, straznik: g, spotkaniaWOdnowieniu: ev.length, stan: st.gameMode });
 } catch (e) { fail('T9', 'Strażnik — ucieczka', e); }
 
