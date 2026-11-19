@@ -53,5 +53,9 @@ jobs:
           grep -n "resizeInterval\|_lastCheck\|getParentBounds()\|step: function" node_modules/phaser/src/scale/ScaleManager.js | head -20 || true
           grep -n "inFocus\|blur: function\|focus: function" node_modules/phaser/src/core/TimeStep.js | head -20 || true
           grep -n "onBlur\|onFocus\|hasFocus" node_modules/phaser/src/core/Game.js | head -20 || true
-          grep -n -A12 "    step: function (time, delta)" node_modules/phaser/src/scale/ScaleManager.js | head -30 || true
+          echo "--- ScaleManager: listenery i odwołania do getParentBounds ---"
+          grep -n -B3 -A14 "startListeners: function" node_modules/phaser/src/scale/ScaleManager.js | head -60 || true
+          for L in 440 476 1160 1355 1475; do sed -n "$((L)),$((L+14))p" node_modules/phaser/src/scale/ScaleManager.js | sed "s/^/[$L] /"; echo; done
+          echo "--- TimeStep.step (fragment) ---"
+          sed -n 540,600p node_modules/phaser/src/core/TimeStep.js || true
           node e2e/audit-probes.mjs http://localhost:4173/

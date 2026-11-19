@@ -229,7 +229,7 @@ try {
 // ───────────── 5b. Rozmiar kamery w czasie po obrocie (bez wejścia) ─────────────
 try {
   phase = 'orientation-2';
-  const snap = () => S(() => { const g = window.__szlaki.game; const c = g.scene.getScene('Overworld').cameras.main; const r = document.querySelector('.phaser-root').getBoundingClientRect(); return { kamera: [c.width, c.height], zoom: c.zoom, gra: [g.scale.width, g.scale.height], rodzic: [Math.round(r.width), Math.round(r.height)], okno: [innerWidth, innerHeight], focus: g.loop.inFocus }; });
+  const snap = () => S(() => { const g = window.__szlaki.game; const c = g.scene.getScene('Overworld').cameras.main; const r = document.querySelector('.phaser-root').getBoundingClientRect(); const sm = g.scale; return { kamera: [c.width, c.height], zoom: c.zoom, gra: [sm.width, sm.height], rodzic: [Math.round(r.width), Math.round(r.height)], parentSize: [sm.parentSize.width, sm.parentSize.height], dirty: sm.dirty, lastCheck: Math.round(sm._lastCheck), resizeInterval: sm.resizeInterval, delta: g.loop.delta, rawDelta: g.loop.rawDelta, frame: g.loop.frame, running: g.loop.running, parentIsWindow: sm.parentIsWindow, parentTag: sm.parent && sm.parent.className, okno: [innerWidth, innerHeight] }; });
   const series = [];
   await page.setViewportSize({ width: 844, height: 390 });
   for (const t of [100, 400, 900, 1600]) { await idle(t - (series.length ? [100, 400, 900, 1600][series.length - 1] : 0)); series.push({ t, ...(await snap()) }); }
