@@ -49,4 +49,9 @@ jobs:
         if: always()
         run: |
           (curl -sf http://localhost:4173/ >/dev/null) || (npx vite preview --port 4173 --strictPort & sleep 5)
+          echo "--- Phaser: ScaleManager.step / TimeStep (fakty do audytu) ---"
+          grep -n "resizeInterval\|_lastCheck\|getParentBounds()\|step: function" node_modules/phaser/src/scale/ScaleManager.js | head -20 || true
+          grep -n "inFocus\|blur: function\|focus: function" node_modules/phaser/src/core/TimeStep.js | head -20 || true
+          grep -n "onBlur\|onFocus\|hasFocus" node_modules/phaser/src/core/Game.js | head -20 || true
+          grep -n -A12 "    step: function (time, delta)" node_modules/phaser/src/scale/ScaleManager.js | head -30 || true
           node e2e/audit-probes.mjs http://localhost:4173/

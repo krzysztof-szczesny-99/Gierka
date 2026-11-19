@@ -200,38 +200,6 @@ try {
   record('P3', 'Pad: pointercancel', 'BŁĄD SONDY', String(e).slice(0, 300));
 }
 
-// ───────────── 4. Utrata fokusu (blur) ─────────────
-try {
-  phase = 'blur';
-  await waitHud();
-  let d = await freeDir();
-  let [x, y] = await dpadPoint(d);
-  await page.mouse.move(x, y);
-  await page.mouse.down();
-  await idle(400);
-  await S(() => { window.dispatchEvent(new Event('blur')); });
-  await idle(350);
-  const a = await pos();
-  await idle(900);
-  const b = await pos();
-  await page.mouse.up();
-  record('P4a', 'Pad: utrata fokusu okna (blur) zatrzymuje ruch', same(a, b) ? 'OK' : 'PROBLEM', { kierunek: d, poBlur: a, po900ms: b });
-
-  await idle(400);
-  d = await freeDir();
-  await page.keyboard.down(KEYS[d]);
-  await idle(400);
-  await S(() => { window.dispatchEvent(new Event('blur')); });
-  await idle(350);
-  const c = await pos();
-  await idle(900);
-  const e2 = await pos();
-  await page.keyboard.up(KEYS[d]);
-  record('P4b', 'Klawiatura: utrata fokusu okna (blur) zatrzymuje ruch', same(c, e2) ? 'OK' : 'PROBLEM', { kierunek: d, poBlur: c, po900ms: e2 });
-} catch (e) {
-  record('P4', 'Blur', 'BŁĄD SONDY', String(e).slice(0, 300));
-}
-
 // ───────────── 5. Zmiana orientacji podczas trzymania pada ─────────────
 try {
   phase = 'orientation';
@@ -261,7 +229,7 @@ try {
 // ───────────── 5b. Rozmiar kamery w czasie po obrocie (bez wejścia) ─────────────
 try {
   phase = 'orientation-2';
-  const snap = () => S(() => { const g = window.__szlaki.game; const c = g.scene.getScene('Overworld').cameras.main; return { kamera: [c.width, c.height], zoom: c.zoom, gra: [g.scale.width, g.scale.height], canvasCss: [g.canvas.clientWidth, g.canvas.clientHeight], okno: [innerWidth, innerHeight] }; });
+  const snap = () => S(() => { const g = window.__szlaki.game; const c = g.scene.getScene('Overworld').cameras.main; const r = document.querySelector('.phaser-root').getBoundingClientRect(); return { kamera: [c.width, c.height], zoom: c.zoom, gra: [g.scale.width, g.scale.height], rodzic: [Math.round(r.width), Math.round(r.height)], okno: [innerWidth, innerHeight], focus: g.loop.inFocus }; });
   const series = [];
   await page.setViewportSize({ width: 844, height: 390 });
   for (const t of [100, 400, 900, 1600]) { await idle(t - (series.length ? [100, 400, 900, 1600][series.length - 1] : 0)); series.push({ t, ...(await snap()) }); }
@@ -273,6 +241,58 @@ try {
   record('P5b', 'Rozmiar kamery po obrocie (pomiar w czasie, bez trzymania pada)', ok ? 'OK' : 'PROBLEM', series);
 } catch (e) {
   record('P5b', 'Kamera po obrocie', 'BŁĄD SONDY', String(e).slice(0, 300));
+}
+
+// ───────────── 4. Utrata fokusu (blur) ─────────────
+try {
+  phase = 'blur';
+  await waitHud();
+  let d = await freeDir();
+  let [x, y] = await dpadPoint(d);
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await idle(400);
+  await S(() => { window.dispatchEvent(new Event('blur')); });
+  await idle(350);
+  const a = await pos();
+  await idle(900);
+  const b = await pos();
+  await page.mouse.up();
+  record('P4a', 'Pad: utrata fokusu okna (blur) zatrzymuje ruch', same(a, b) ? 'OK' : 'PROBLEM', { kierunek: d, poBlur: a, po900ms: b });
+
+  await idle(400);
+  d = await freeDir();
+  await page.keyboard.down(KEYS[d]);
+  await idle(400);
+  await S(() => { window.dispatchEvent(new Event('blur')); });
+  await idle(350);
+  const c = await pos();
+  await idle(900);
+  const e2 = await pos();
+  await page.keyboard.up(KEYS[d]);
+  record('P4b', 'Klawiatura: utrata fokusu okna (blur) zatrzymuje ruch', same(c, e2) ? 'OK' : 'PROBLEM', { kierunek: d, poBlur: c, po900ms: e2 });
+  await S(() => window.dispatchEvent(new Event('focus'))); // przywrócenie fokusu po sondzie
+} catch (e) {
+  record('P4', 'Blur', 'BŁĄD SONDY', String(e).slice(0, 300));
+}
+
+// ───────────── 5c. Obrót po utracie fokusu bez jego przywrócenia, potem po „focus” ─────────────
+try {
+  phase = 'orientation-blur';
+  const snap = () => S(() => { const g = window.__szlaki.game; const c = g.scene.getScene('Overworld').cameras.main; const r = document.querySelector('.phaser-root').getBoundingClientRect(); return { kamera: [c.width, c.height], gra: [g.scale.width, g.scale.height], rodzic: [Math.round(r.width), Math.round(r.height)], okno: [innerWidth, innerHeight], focus: g.loop.inFocus, hasFocus: g.hasFocus }; });
+  await S(() => window.dispatchEvent(new Event('blur')));
+  await page.setViewportSize({ width: 844, height: 390 });
+  await idle(1200);
+  const poBlur = await snap();
+  await S(() => window.dispatchEvent(new Event('focus')));
+  await idle(1200);
+  const poFocus = await snap();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await idle(1200);
+  const pion = await snap();
+  record('P5c', 'Obrót ekranu po utracie fokusu (bez „focus”), a następnie po przywróceniu fokusu', 'INFO', { poBlur, poFocus, pion });
+} catch (e) {
+  record('P5c', 'Obrót po blur', 'BŁĄD SONDY', String(e).slice(0, 300));
 }
 
 // ───────────── 6. Blokada spotkań: dwa stworzenia naraz, ruch w przejściu, obce anulowanie ─────────────
