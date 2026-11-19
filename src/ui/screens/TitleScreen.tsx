@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { versionLabel } from '../../config/version';
 import { errorMessage } from '../../services/creatureService';
 import { ensureCoreData } from '../../services/bootService';
 import { useGame } from '../../state/gameStore';
@@ -79,6 +80,9 @@ export function TitleScreen() {
         <p className="fineprint">
           Niekomercyjny projekt fanowski. Dane: PokéAPI (pokeapi.co). Nazwy i grafiki stworzeń należą do ich prawnych
           właścicieli; mapy, interfejs i kod są oryginalne.
+        </p>
+        <p className="fineprint" data-testid="app-version">
+          Wersja {versionLabel()}
         </p>
       </div>
     </div>
