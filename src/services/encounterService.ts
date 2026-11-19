@@ -1,25 +1,28 @@
 // Orkiestracja: przejście eksploracja → walka → powrót, leczenie w Stacji Opieki, obsługa drzwi.
-// Spotkanie zaczyna się wyłącznie przez useUi.tryStartEncounter (centralna blokada), a kończy wyłącznie
+// Spotkanie zaczyna się wyłącznie przez centralną blokadę (useUi.tryStartEncounter — bezpośrednio przy kontakcie
+// ze stworzeniem specjalnym albo przez useUi.registerEncounterStep po kroku w trawie), a kończy wyłącznie
 // przez finishBattle (wynik walki) albo cancelEncounter (błąd rozpoczęcia, zamknięcie interfejsu walki).
 // Wspólne zakończenie (concludeEncounter) wykonuje się dokładnie raz dla każdego spotkania.
 
-import { ENCOUNTER_COOLDOWN_MS } from '../config/encounters';
+import { isOnline } from '../api/pokeapi';
+import { ENCOUNTER_CONFIG, staticDoneFlag } from '../config/encounters';
 import { CURRENCY } from '../config/text';
 import { RULES } from '../config/rules';
-import { getMove, getPokemon, getTypeChart, getGrowthTables } from '../data/repository';
+import { getMove, getPokemon, getTypeChart, getGrowthTables, isPokemonCached } from '../data/repository';
 import { saveNow } from '../data/saveGame';
 import { createWildBattle } from '../engine/battle/battleEngine';
 import type { BattleEvent, BattleState } from '../engine/battle/types';
 import { displayName } from '../engine/creature';
 import { gameRng, type Rng } from '../engine/rng';
 import type { Dir, GrowthTable, MoveData, PokemonData, TypeChart } from '../engine/types';
-import { bus, type BusEvents, type EncounterOutcome } from '../game/eventBus';
+import { eligibleEntries, encounterTable, methodForTerrain, pickEncounterEntry } from '../game/encounterZones';
+import { bus, type BusEvents, type EncounterOutcome, type StepEncounterSource } from '../game/eventBus';
 import { releaseInput } from '../game/input';
-import { MAPS, TEST_MAP } from '../game/maps/testMap';
+import { MAPS, TEST_MAP, type StaticEncounterDef } from '../game/maps/testMap';
 import { useBattle } from '../state/battleStore';
 import { useGame } from '../state/gameStore';
 import { encounterClock, useUi, type EncounterEndReason, type LearnRequest } from '../state/uiStore';
-import { dexInfo, errorMessage, loadMovesSafe } from './creatureService';
+import { buildWild, dexInfo, errorMessage, loadMovesSafe, type WildSpawn } from './creatureService';
 
 /** Zależności zewnętrzne (dane, zapis, losowość, czas) — podmienialne w testach jednostkowych. */
 export interface EncounterDeps {
@@ -29,7 +32,12 @@ export interface EncounterDeps {
   getGrowthTables(names: string[]): Promise<Record<string, GrowthTable>>;
   loadMoves(names: string[]): Promise<Record<string, MoveData>>;
   saveNow(): Promise<void>;
+  /** Losowość budowania stworzeń i nagród (w grze: gameRng, w trybie ?debug&seed=N — z ziarnem). */
   rng: Rng;
+  /** Źródło rzutu na spotkanie po kroku (osobne, aby testy mogły je kontrolować). */
+  stepRng: Rng;
+  /** Stworzenie dla spotkania wylosowanego po kroku (tabela strefy, ważony wybór, poziom z zakresu). */
+  buildStepSpawn(source: StepEncounterSource, rng: Rng): Promise<WildSpawn>;
   now(): number;
   /** Minimalny czas animacji przejścia do walki. */
   minTransitionMs: number;
@@ -43,6 +51,8 @@ const DEFAULT_DEPS: EncounterDeps = {
   loadMoves: loadMovesSafe,
   saveNow,
   rng: gameRng,
+  stepRng: gameRng,
+  buildStepSpawn: buildStepSpawnFromTable,
   now: encounterClock,
   minTransitionMs: 750,
 };
@@ -60,6 +70,32 @@ export function configureEncounterDeps(patch: Partial<EncounterDeps>): () => voi
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+/** Źródło rzutu na spotkanie po kroku (używa go scena mapy). */
+export function encounterStepRng(): Rng {
+  return deps.stepRng;
+}
+
+/** Losuje stworzenie z tabeli strefy dla terenu, w którym wykonano krok. Offline: tylko gatunki z bufora. */
+export async function buildStepSpawnFromTable(source: StepEncounterSource, rng: Rng): Promise<WildSpawn> {
+  const table = encounterTable(source.encounterTableId);
+  const method = methodForTerrain(source.terrainType);
+  if (!method || method === 'static') throw new Error('Ten teren nie obsługuje losowych spotkań.');
+  let entries = eligibleEntries(table, method, useGame.getState().flags);
+  if (!isOnline()) {
+    const cached = await Promise.all(entries.map((e) => isPokemonCached(e.pokemonId)));
+    entries = entries.filter((_, i) => cached[i]);
+    if (!entries.length) throw new Error('Offline: brak zapisanych danych stworzeń z tego miejsca.');
+  }
+  const entry = pickEncounterEntry(entries, rng);
+  return buildWild(entry, table, { id: source.zoneId, name: source.zoneName }, rng);
+}
+
+/** Stworzenie dla spotkania specjalnego (wpis „static” z jego tabeli). */
+export async function buildStaticSpawn(def: StaticEncounterDef, zoneName: string): Promise<WildSpawn> {
+  const table = encounterTable(def.encounterTableId);
+  const entry = pickEncounterEntry(eligibleEntries(table, 'static', useGame.getState().flags), deps.rng);
+  return buildWild(entry, table, { id: def.zoneId, name: zoneName }, deps.rng);
+}
 function isStarting(encounterId: string): boolean {
   const u = useUi.getState();
   return u.activeEncounterId === encounterId && u.gameMode === 'ENCOUNTER_STARTING';
@@ -76,14 +112,17 @@ export async function startWildEncounter(payload: BusEvents['encounter']): Promi
   bus.emit('battle-start', undefined);
   const t0 = deps.now();
 
+  const source = payload.source;
   let built: { state: BattleState; events: BattleEvent[] };
+  let spawn: WildSpawn;
   try {
     const game = useGame.getState();
     const party = game.party;
     if (!party.some((c) => c.hp > 0)) throw new Error('Twoja drużyna jest wyczerpana. Odwiedź Stację Opieki!');
-    const enemy = payload.spawn.creature;
+    spawn = source.kind === 'static' ? source.spawn : await deps.buildStepSpawn(source, deps.rng);
+    const enemy = spawn.creature;
     const [typeChart, partyData] = await Promise.all([deps.getTypeChart(), Promise.all(party.map((c) => deps.getPokemon(c.pokemon)))]);
-    const pokemon: Record<string, PokemonData> = { [payload.spawn.pokemon.name]: payload.spawn.pokemon };
+    const pokemon: Record<string, PokemonData> = { [spawn.pokemon.name]: spawn.pokemon };
     for (const p of partyData) pokemon[p.name] = p;
     const moves = await deps.loadMoves([...party, enemy].flatMap((c) => c.moves.map((m) => m.name)));
     const growth = await deps.getGrowthTables(party.map((c) => c.growthRate));
@@ -96,7 +135,7 @@ export async function startWildEncounter(payload: BusEvents['encounter']): Promi
       moves,
       growth,
       typeChart,
-      captureRate: payload.spawn.species.captureRate,
+      captureRate: spawn.species.captureRate,
     });
 
     const elapsed = deps.now() - t0;
@@ -114,13 +153,14 @@ export async function startWildEncounter(payload: BusEvents['encounter']): Promi
     return false;
   }
   const game = useGame.getState();
-  game.markSeen(dexInfo(payload.spawn.pokemon, payload.spawn.species));
+  game.markSeen(dexInfo(spawn.pokemon, spawn.species));
   game.incStat('encounters');
   useBattle.getState().begin(built.state, built.events, {
     encounterId: id,
-    actorId: payload.actorId,
-    zoneId: payload.spawn.zoneId,
-    enemySpecies: payload.spawn.species,
+    actorId: source.kind === 'static' ? source.actorId : null,
+    staticId: source.kind === 'static' ? source.staticId : null,
+    zoneId: spawn.zoneId,
+    enemySpecies: spawn.species,
   });
   const ui = useUi.getState();
   ui.confirmBattle(id);
@@ -174,6 +214,8 @@ export async function finishBattle(): Promise<boolean> {
       game.incStat('fled');
     }
     if ((outcome === 'win' || outcome === 'caught') && meta.zoneId === 'grove') game.setFlag('grove-done');
+    // Spotkanie specjalne po wygranej lub złapaniu nie pojawia się ponownie (flaga w istniejącym polu zapisu).
+    if ((outcome === 'win' || outcome === 'caught') && meta.staticId) game.setFlag(staticDoneFlag(meta.staticId));
 
     // Porażka: powrót do Stacji Opieki.
     const map = MAPS[useGame.getState().player.mapId] ?? TEST_MAP;
@@ -253,8 +295,8 @@ function concludeEncounter(
   ui.setTransition(false);
   if (ui.mode === 'battle') ui.setMode('overworld');
   if (teleportTo) bus.emit('teleport', teleportTo);
-  // 6) Odnowienie — chwila bez nowych spotkań.
-  ui.setEncounterCooldown(deps.now() + ENCOUNTER_COOLDOWN_MS);
+  // 6) Odnowienie — kilka poprawnych kroków bez nowych spotkań.
+  ui.setEncounterCooldown(ENCOUNTER_CONFIG.cooldownSteps);
   // 7) Joystick od zera (palec trzymany przed walką nie porusza postaci).
   releaseInput('encounter-end');
   // 8) EXPLORATION.

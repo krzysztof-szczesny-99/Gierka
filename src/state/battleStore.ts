@@ -48,6 +48,8 @@ export interface BattleMeta {
   /** Spotkanie z centralnej blokady, do którego należy ta walka. */
   encounterId: string | null;
   actorId: string | null;
+  /** Spotkanie specjalne (widoczne na mapie), jeśli walka z niego pochodzi. */
+  staticId: string | null;
   zoneId: string | null;
   enemySpecies: SpeciesData | null;
 }
@@ -242,7 +244,7 @@ export const useBattle = create<BattleStore>()((set, get) => {
     view: null,
     phase: 'intro',
     menu: 'root',
-    meta: { encounterId: null, actorId: null, zoneId: null, enemySpecies: null },
+    meta: { encounterId: null, actorId: null, staticId: null, zoneId: null, enemySpecies: null },
 
     begin: (state, intro, meta) => {
       playToken += 1;
@@ -276,7 +278,7 @@ export const useBattle = create<BattleStore>()((set, get) => {
     clear: () => {
       playToken += 1;
       pendingWait?.();
-      set({ engine: null, view: null, phase: 'intro', menu: 'root', meta: { encounterId: null, actorId: null, zoneId: null, enemySpecies: null } });
+      set({ engine: null, view: null, phase: 'intro', menu: 'root', meta: { encounterId: null, actorId: null, staticId: null, zoneId: null, enemySpecies: null } });
     },
   };
 });

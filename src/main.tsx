@@ -1,16 +1,24 @@
 import { createRoot } from 'react-dom/client';
 import { registerSW } from 'virtual:pwa-register';
 import App from './App';
-import { expose } from './debug';
+import { debugSeed, expose } from './debug';
+import { createRng, createSequenceRng, gameRng, rngFromNext } from './engine/rng';
 import { bus } from './game/eventBus';
 import { installInputGuards, joystick, virtualInput } from './game/input';
+import { configureEncounterDeps } from './services/encounterService';
 import { useBattle } from './state/battleStore';
 import { useGame } from './state/gameStore';
 import { useUi, type BeforeInstallPromptEvent } from './state/uiStore';
 import './ui/styles/global.css';
 
+// Tryb ?debug&seed=N: powtarzalna losowość gry (testy E2E). Bez ?debug parametr jest ignorowany.
+const seed = debugSeed();
+if (seed !== null) gameRng.reseed(seed);
+
 expose('stores', { useGame, useUi, useBattle, bus });
 expose('input', { joystick, virtualInput });
+// Kontrolowane źródło losowości spotkań dla testów E2E (tylko ?debug).
+expose('encounter', { configure: configureEncounterDeps, createRng, createSequenceRng, rngFromNext, seed });
 
 // Joystick zatrzymuje się po utracie fokusu, ukryciu/zamknięciu strony i obrocie ekranu.
 installInputGuards(window, document);

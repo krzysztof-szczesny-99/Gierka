@@ -1,13 +1,21 @@
 // Lekka, typowana szyna zdarzeń między Phaserem (mapa) a Reactem/serwisami.
 
+import type { TerrainType } from '../config/encounters';
 import type { Dir } from '../engine/types';
 import type { WildSpawn } from '../services/creatureService';
 
 export type EncounterOutcome = 'win' | 'lose' | 'fled' | 'caught' | 'cancel';
 
+/** Źródło spotkania: widoczne stworzenie specjalne albo losowanie po kroku w strefie. */
+export type EncounterSource =
+  | { kind: 'static'; actorId: string; staticId: string; spawn: WildSpawn }
+  | { kind: 'step'; locationId: string; zoneId: string; zoneName: string; terrainType: TerrainType; encounterTableId: string };
+
+export type StepEncounterSource = Extract<EncounterSource, { kind: 'step' }>;
+
 export interface BusEvents {
   /** Wysyłane wyłącznie po przejęciu centralnej blokady (useUi.tryStartEncounter) — z jej identyfikatorem. */
-  encounter: { encounterId: string; actorId: string; spawn: WildSpawn };
+  encounter: { encounterId: string; source: EncounterSource };
   'battle-start': undefined;
   /** Wynik spotkania dla obiektu źródłowego na mapie (usunięcie stworzenia albo odnowienie). */
   'battle-end': { encounterId: string; actorId: string | null; outcome: EncounterOutcome };

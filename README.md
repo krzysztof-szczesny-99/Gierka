@@ -70,7 +70,7 @@ GitHuba (testy + build) i publikuje ją pod adresem `https://<login>.github.io/<
 3. iPhone: otwórz adres gry w Safari → „Udostępnij” → „Do ekranu początkowego”. Android: Chrome → „Zainstaluj aplikację”.
 
 Po pierwszym uruchomieniu przez HTTPS gra zgłosi „gotowa do działania offline”. Offline działają: aplikacja,
-zapis, zbuforowane dane i sprite'y; na mapie pojawiają się tylko gatunki, które były już pobrane.
+zapis, zbuforowane dane i sprite'y; w trawie spotkasz offline tylko gatunki, które były już pobrane.
 
 ## Sterowanie
 
@@ -90,8 +90,12 @@ zapis, zbuforowane dane i sprite'y; na mapie pojawiają się tylko gatunki, któ
 - Oryginalna mapa testowa 40×32 (Polana Startowa) z czterema strefami: Łąka, Brzeg Stawu, Skalny Zakątek, Cichy Gaj.
 - Ruch po siatce: joystick ekranowy, opcjonalnie klawiatura; bieg; kamera z dopasowaniem przybliżenia.
 - Spotkania przez jedną centralną blokadę (tylko jedno naraz, wynik walki liczony dokładnie raz, krótkie odnowienie po walce).
-- Stworzenia widoczne na mapie: wędrują po strefach, część podchodzi do gracza („!”), rzadkie „Potężne okazy”,
-  błyszczące warianty; odradzanie; formy regionalne (np. `rattata-alola`, `wooper-paldea`).
+- Losowe spotkania po kroku (Sprint 2): wysoka trawa (Łąka, brzeg Stawu, Cichy Gaj) — 10% na krok, skalisty grunt
+  Skalnego Zakątka (teren jaskini) — 8%; po walce 3 kroki bez spotkań, po wejściu na mapę 2 kroki ochronne.
+  Osada, ścieżki i zwykła trawa są bezpieczne. Wartości i tabele: `src/config/encounters.ts`.
+- Zwykłe dzikie stworzenia nie chodzą po mapie; widoczny jest tylko nieruchomy „Strażnik Cichego Gaju”
+  (spotkanie specjalne — po wygranej lub złapaniu znika na stałe). Rzadkie „Potężne okazy”, błyszczące warianty,
+  formy regionalne (np. `rattata-alola`, `wooper-paldea`).
 - Towarzysz (prowadzący drużyny) podąża za graczem.
 - Dynamiczne przejście eksploracja → walka (rozbłysk kamery + oryginalny efekt przejścia).
 - Walka turowa 1 na 1: 4 ruchy, priorytet i szybkość, STAB, skuteczność typów (z PokéAPI), krytyki, celność i unik,
@@ -126,6 +130,6 @@ zapis, zbuforowane dane i sprite'y; na mapie pojawiają się tylko gatunki, któ
 ## Rozwiązywanie problemów
 
 - **„Pierwsze uruchomienie wymaga internetu”** — gra musi raz pobrać tabelę typów i krzywe EXP.
-- **Brak stworzeń na mapie** — sprawdź połączenie; offline pojawiają się tylko zbuforowane gatunki.
+- **Brak spotkań offline** — offline w trawie losowane są tylko gatunki, które były już pobrane.
 - **Stara wersja po aktualizacji** — service worker aktualizuje się sam; w razie potrzeby zamknij i otwórz aplikację.
 - **Czyste dane** — Menu → „Wyczyść bufor danych” (dane API) lub „Usuń zapis” (postęp).

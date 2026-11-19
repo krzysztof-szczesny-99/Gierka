@@ -1,6 +1,7 @@
 // Budowanie stworzeń z danych PokéAPI (dzikie, startery) i pomocnicze ładowanie ruchów.
 
 import type { EncounterEntry, EncounterTable } from '../config/encounters';
+import { assertAllowedSpecies, rollLevel } from '../game/encounterZones';
 import { FALLBACK_DAMAGE_MOVE } from '../config/moveOverrides';
 import { RULES } from '../config/rules';
 import { getGrowth, getMove, getPokemon, getSpecies } from '../data/repository';
@@ -22,7 +23,6 @@ export interface WildSpawn {
   species: SpeciesData;
   zoneId: string;
   zoneName: string;
-  aggressive: boolean;
 }
 
 export async function loadBundle(name: string): Promise<CreatureBundle> {
@@ -59,6 +59,7 @@ export async function movesFor(pokemon: PokemonData, level: number): Promise<Mov
   return list;
 }
 
+/** Dzikie stworzenie z wpisu tabeli: poziom z zakresu wpisu, szansa na „Potężny okaz”, ruchy na poziom. */
 export async function buildWild(
   entry: EncounterEntry,
   table: EncounterTable,
@@ -66,8 +67,9 @@ export async function buildWild(
   rng: Rng,
 ): Promise<WildSpawn> {
   const mighty = rng.chance(table.mightyChance ?? RULES.mightyChance);
-  const level = Math.min(RULES.maxLevel, rng.int(entry.min, entry.max) + (mighty ? RULES.mightyLevelBonus : 0));
-  const b = await loadBundle(entry.pokemon);
+  const level = Math.min(RULES.maxLevel, rollLevel(entry, rng) + (mighty ? RULES.mightyLevelBonus : 0));
+  const b = await loadBundle(entry.pokemonId);
+  assertAllowedSpecies(b.species, entry.encounterMethod);
   const moves = await movesFor(b.pokemon, level);
   const creature = createCreature({ ...b, level, moves, rng, metAt: zone.name, mighty });
   return {
@@ -76,7 +78,6 @@ export async function buildWild(
     species: b.species,
     zoneId: zone.id,
     zoneName: zone.name,
-    aggressive: mighty || rng.chance(table.aggressiveChance),
   };
 }
 
