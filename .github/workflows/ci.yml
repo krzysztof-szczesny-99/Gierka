@@ -1,0 +1,52 @@
+# Kontrola jakości gałęzi roboczych (sprinty) — BEZ publikacji.
+# Kolejność: zależności → kontrola typów → testy jednostkowe → build → E2E (+ sondy audytowe).
+name: CI (gałęzie robocze)
+
+on:
+  push:
+    branches-ignore: [main, e2e-results]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Instalacja zależności
+        run: npm install --no-audit --no-fund
+
+      - name: Wersje zainstalowanych zależności
+        run: npm ls --depth=0 || true
+
+      - name: Kontrola typów
+        run: npm run typecheck
+
+      - name: Testy jednostkowe
+        run: npm test
+
+      - name: Build produkcyjny
+        run: npm run build
+
+      - name: Przeglądarka do E2E
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1
+          npx playwright install --with-deps chromium
+
+      - name: Test E2E (smoke)
+        run: |
+          npx vite preview --port 4173 --strictPort &
+          for i in $(seq 1 30); do curl -sf http://localhost:4173/ >/dev/null && break; sleep 1; done
+          node e2e/smoke.mjs http://localhost:4173/
+
+      - name: Sondy audytowe (informacyjne)
+        if: always()
+        run: |
+          (curl -sf http://localhost:4173/ >/dev/null) || (npx vite preview --port 4173 --strictPort & sleep 5)
+          node e2e/audit-probes.mjs http://localhost:4173/

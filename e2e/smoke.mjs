@@ -157,3 +157,5 @@ try {
 await browser.close();
 console.log('\n=== PROBLEMY (' + problems.length + ') ===\n' + (problems.join('\n') || 'brak'));
 fs.writeFileSync(`${OUT}/problems.txt`, problems.join('\n') || 'brak');
+// Każdy problem (błąd konsoli, wyjątek, nieudana asercja) kończy test kodem ≠ 0.
+process.exitCode = problems.length ? 1 : 0;
