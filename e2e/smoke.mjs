@@ -21,6 +21,10 @@ const scene = (fn) => page.evaluate(fn);
 
 try {
   await page.goto(BASE + '?debug');
+  // Wersja gry na ekranie tytułowym (w CI: skrót commita) — pozwala sprawdzić na telefonie, czy aktualizacja dotarła.
+  const version = (await page.getByTestId('app-version').textContent({ timeout: 15000 }))?.trim() ?? '';
+  log('wersja', version);
+  if (!/^Wersja [0-9a-f]{7}/.test(version)) problems.push(`Ekran tytułowy nie pokazuje wersji z commita: „${version}”`);
   await page.getByRole('button', { name: 'Nowa gra' }).click();
   await page.locator('.starter-card h3').nth(2).waitFor({ timeout: 30000 });
   await page.waitForTimeout(1500);

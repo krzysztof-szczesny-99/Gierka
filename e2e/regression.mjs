@@ -711,6 +711,20 @@ try {
   record('T13', 'Po wejściu na mapę 2 kroki ochronne (bez losowań), trzeci losuje; Strażnik nie wraca po złapaniu; towarzysz jest', ok, { odnowieniePoWczytaniu: u0.cooldown, mapa: map, spot, odnowieniePoKrokach: seen, spotkaniaW2Krokach: ev2, spotkaniaPo3: ev3 });
 } catch (e) { fail('T13', 'Wejście na mapę', e); }
 
+// ───────────── U1. Wersja i ręczne sprawdzenie aktualizacji (Menu) ─────────────
+try {
+  await waitJoystick();
+  await page.locator('.hud-menu button', { hasText: '☰' }).click();
+  await page.locator('.modal').waitFor();
+  const version = (await page.getByTestId('options-version').textContent())?.trim() ?? '';
+  await page.getByRole('button', { name: 'Sprawdź aktualizację' }).click();
+  await page.locator('.toast').waitFor({ timeout: 15000 });
+  const toast = (await page.locator('.toast').textContent())?.trim() ?? '';
+  const sw = await S(async () => ({ kontroluje: !!navigator.serviceWorker?.controller }));
+  await page.locator('.modal-close').click();
+  record('U1', 'Menu pokazuje wersję gry; „Sprawdź aktualizację” pyta serwer (service worker) i odpowiada', /^[0-9a-f]{7}/.test(version) && toast === 'Masz najnowszą wersję gry.' && sw.kontroluje, { wersja: version, komunikat: toast, serviceWorker: sw });
+} catch (e) { fail('U1', 'Sprawdzenie aktualizacji', e); }
+
 // ───────────── R17. Konsola ─────────────
 record('R17', 'Brak błędów i ostrzeżeń w konsoli (bez komunikatów sterownika GL)', consoleIssues.length === 0, consoleIssues);
 await shot('r17-end');

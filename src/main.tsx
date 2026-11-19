@@ -6,6 +6,7 @@ import { createRng, createSequenceRng, gameRng, rngFromNext } from './engine/rng
 import { bus } from './game/eventBus';
 import { installInputGuards, joystick, virtualInput } from './game/input';
 import { configureEncounterDeps } from './services/encounterService';
+import { checkForUpdate, installUpdateChecks, setUpdateRegistration } from './services/updateService';
 import { useBattle } from './state/battleStore';
 import { useGame } from './state/gameStore';
 import { useUi, type BeforeInstallPromptEvent } from './state/uiStore';
@@ -17,6 +18,7 @@ if (seed !== null) gameRng.reseed(seed);
 
 expose('stores', { useGame, useUi, useBattle, bus });
 expose('input', { joystick, virtualInput });
+expose('update', { checkForUpdate });
 // Kontrolowane źródło losowości spotkań dla testów E2E (tylko ?debug).
 expose('encounter', { configure: configureEncounterDeps, createRng, createSequenceRng, rngFromNext, seed });
 
@@ -34,6 +36,13 @@ window.addEventListener('appinstalled', () => useUi.getState().setInstallPrompt(
 if ('serviceWorker' in navigator && window.isSecureContext) {
   registerSW({
     immediate: true,
+    // Aplikacja z ekranu głównego bywa tylko wznawiana z tła — sprawdzamy aktualizacje jawnie (updateService).
+    onRegisteredSW(_swUrl, registration) {
+      if (!registration) return;
+      setUpdateRegistration(registration);
+      void checkForUpdate();
+      installUpdateChecks(window, document);
+    },
     onOfflineReady() {
       useUi.getState().setOfflineReady(true);
       useUi.getState().showToast('Gra jest gotowa do działania offline.');

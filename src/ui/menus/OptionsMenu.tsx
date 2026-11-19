@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { getRequestCount } from '../../api/pokeapi';
+import { versionLabel } from '../../config/version';
 import { cacheStats, clearApiCache } from '../../data/repository';
 import { deleteSave, exportSave, getLastSaveAt, importSave, saveNow } from '../../data/saveGame';
 import { errorMessage } from '../../services/creatureService';
+import { checkForUpdate } from '../../services/updateService';
 import { useGame, type Settings } from '../../state/gameStore';
 import { useUi } from '../../state/uiStore';
 import { Modal } from '../components/common';
@@ -38,6 +40,7 @@ export function OptionsMenu() {
   const offlineReady = useUi((s) => s.offlineReady);
   const [cache, setCache] = useState<number | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [checking, setChecking] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const toast = (t: string) => useUi.getState().showToast(t);
 
@@ -161,6 +164,34 @@ export function OptionsMenu() {
           }}
         >
           Wyczyść bufor danych
+        </button>
+      </div>
+
+      <div className="card stack small">
+        <b>Wersja gry</b>
+        <div className="muted" data-testid="options-version">
+          {versionLabel()}
+        </div>
+        <button
+          className="btn btn-small"
+          disabled={checking}
+          onClick={async () => {
+            setChecking(true);
+            await saveNow().catch(() => undefined);
+            const r = await checkForUpdate();
+            setChecking(false);
+            const text: Record<typeof r, string> = {
+              'up-to-date': 'Masz najnowszą wersję gry.',
+              downloading: 'Pobieram nową wersję — gra za chwilę uruchomi się ponownie (postęp jest zapisany).',
+              offline: 'Brak internetu — nie można sprawdzić aktualizacji.',
+              unsafe: 'Aktualizację można sprawdzić poza walką.',
+              'no-registration': 'Aktualizacje działają w aplikacji otwartej przez HTTPS (np. z ekranu głównego).',
+              error: 'Nie udało się sprawdzić aktualizacji. Spróbuj ponownie za chwilę.',
+            };
+            toast(text[r]);
+          }}
+        >
+          {checking ? 'Sprawdzam…' : 'Sprawdź aktualizację'}
         </button>
       </div>
 
