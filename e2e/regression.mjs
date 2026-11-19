@@ -556,22 +556,31 @@ try {
   await freezeActors();
   await unfreezeSpawns();
   await page.waitForFunction(() => window.__szlaki.game.scene.getScene('Overworld').actors.filter((a) => !a.removed && !a.engaged).length >= 1, null, { timeout: 30000 });
-  await placeWithRoom('right', 4);
-  await idle(300);
+  // Scenariusz w obrębie strefy stworzenia (stworzenia nie gonią gracza daleko poza swoją strefę).
   const setup = await S(() => {
     const sc = window.__szlaki.game.scene.getScene('Overworld');
-    const a = sc.actors.find((x) => !x.removed && !x.engaged);
-    const x = sc.tx + 3, y = sc.ty;
-    sc.tweens.killTweensOf(a.container);
-    a.tx = x; a.ty = y; a.moving = false;
-    a.container.setPosition(x * 16 + 8, (y + 1) * 16);
-    a.aggressive = true; a.noticed = false; a.cooldownUntil = 0; a.nextThink = 0;
-    // Pozostałe stworzenia daleko od gracza nie biorą udziału.
-    for (const o of sc.actors) if (o !== a) o.aggressive = false;
-    window.__enc = 0; window.__encFrom = [];
-    window.__szlaki.stores.useUi.setState({ encounterCooldown: 0 });
-    return { id: a.id, at: [x, y], gracz: [sc.tx, sc.ty] };
+    const free = (x, y) => sc.isWalkable(x, y) && !sc.actorAt(x, y);
+    for (const a of sc.actors.filter((x) => !x.removed && !x.engaged)) {
+      const r = a.zone.rect;
+      for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w - 3; x++) {
+        if (![0, 1, 2, 3].every((i) => free(x + i, y) || (x + i === a.tx && y === a.ty))) continue;
+        window.__szlaki.stores.bus.emit('teleport', { x, y, facing: 'right' });
+        const ax = x + 3;
+        sc.tweens.killTweensOf(a.container);
+        a.tx = ax; a.ty = y; a.moving = false;
+        a.container.setPosition(ax * 16 + 8, (y + 1) * 16);
+        a.aggressive = true; a.noticed = false; a.cooldownUntil = 0; a.nextThink = 0;
+        // Pozostałe stworzenia nie gonią (izolacja scenariusza).
+        for (const o of sc.actors) if (o !== a) o.aggressive = false;
+        window.__enc = 0; window.__encFrom = [];
+        window.__szlaki.stores.useUi.setState({ encounterCooldown: 0 });
+        return { id: a.id, strefa: a.zone.id, at: [ax, y], gracz: [x, y] };
+      }
+    }
+    return null;
   });
+  if (!setup) throw new Error('brak miejsca na scenariusz pościgu');
+  await idle(300);
   const p0 = await pos();
   await S(() => { const sc = window.__szlaki.game.scene.getScene('Overworld'); delete sc.updateActors; });
   await page.waitForFunction(() => window.__szlaki.stores.useUi.getState().gameMode !== 'EXPLORATION', null, { timeout: 15000 });

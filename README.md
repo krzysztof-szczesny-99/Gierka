@@ -74,9 +74,12 @@ zapis, zbuforowane dane i sprite'y; na mapie pojawiają się tylko gatunki, któ
 
 ## Sterowanie
 
-- **Pad** (lewy dolny róg) — działa jak drążek: przesuwaj kciuk w stronę kierunku.
-- **Dotknięcie mapy** — postać sama dojdzie w wybrane miejsce (także do stworzenia, tabliczki, drzwi).
-- **A** — interakcja (tabliczki, drzwi, stworzenie przed tobą). Dotknięcie własnej postaci działa tak samo.
+- **Joystick** (lewy dolny róg) — przytrzymaj i przesuwaj kciuk; gałka pokazuje wychylenie. Małe wychylenie
+  (martwa strefa) nie porusza postaci, puszczenie zatrzymuje ją na najbliższym polu. Ruch odbywa się po siatce
+  w 4 kierunkach, więc wychylenie po przekątnej nie przyspiesza postaci.
+- Joystick zatrzymuje się sam przy przełączeniu aplikacji, zablokowaniu ekranu i obrocie telefonu.
+- **Dotknięcie mapy nie porusza postaci** (od Sprintu 1 głównym sterowaniem jest joystick).
+- **A** — interakcja (tabliczki, drzwi, stworzenie przed tobą).
 - **B** — przełącza bieg.
 - Klawiatura (komputer): strzałki, Spacja = A, Shift = bieg.
 - W walce: dotknięcie areny lub okna komunikatu przyspiesza komunikaty.
@@ -85,7 +88,8 @@ zapis, zbuforowane dane i sprite'y; na mapie pojawiają się tylko gatunki, któ
 
 - Wybór startera spośród trzech stworzeń z każdej z 9 generacji (dane i grafiki pobierane z PokéAPI po otwarciu generacji).
 - Oryginalna mapa testowa 40×32 (Polana Startowa) z czterema strefami: Łąka, Brzeg Stawu, Skalny Zakątek, Cichy Gaj.
-- Ruch po siatce: pad, dotknięcie celu (wyszukiwanie ścieżki BFS), klawiatura; bieg; kamera z dopasowaniem przybliżenia.
+- Ruch po siatce: joystick ekranowy, opcjonalnie klawiatura; bieg; kamera z dopasowaniem przybliżenia.
+- Spotkania przez jedną centralną blokadę (tylko jedno naraz, wynik walki liczony dokładnie raz, krótkie odnowienie po walce).
 - Stworzenia widoczne na mapie: wędrują po strefach, część podchodzi do gracza („!”), rzadkie „Potężne okazy”,
   błyszczące warianty; odradzanie; formy regionalne (np. `rattata-alola`, `wooper-paldea`).
 - Towarzysz (prowadzący drużyny) podąża za graczem.

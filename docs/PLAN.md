@@ -44,7 +44,7 @@ bufor w IndexedDB (TTL 30 dni, przy braku sieci zwraca przeterminowane dane).
 
 ```
 ┌──────────────────────── React (UI DOM, dotyk) ────────────────────────┐
-│ Ekrany: Tytuł · Starter · HUD/pad · Walka · Drużyna · Torba · Atlas … │
+│ Ekrany: Tytuł · Starter · HUD/joystick · Walka · Drużyna · Torba · … │
 └───────────▲──────────────────────────────▲────────────────────────────┘
             │ selektory Zustand            │ akcje
 ┌───────────┴───────────┐      ┌───────────┴─────────────┐
@@ -114,7 +114,7 @@ szlaki-dziczy/
    ├─ engine/     types.ts · rng.ts · stats.ts · typeChart.ts · experience.ts · moves.ts · creature.ts
    │  ├─ battle/  types.ts · damage.ts · status.ts · catch.ts · ai.ts · battleEngine.ts
    │  └─ __tests__/ engine.test.ts · fixtures.ts
-   ├─ game/       PhaserGame.tsx · eventBus.ts · input.ts · tiles.ts · art.ts · textures.ts · pathfinding.ts
+   ├─ game/       PhaserGame.tsx · eventBus.ts · input.ts (joystick) · movement.ts (reguły ruchu) · tiles.ts · art.ts · textures.ts
    │  ├─ maps/    testMap.ts
    │  └─ scenes/  BootScene.ts · OverworldScene.ts
    ├─ services/   creatureService.ts · encounterService.ts · bootService.ts
@@ -126,7 +126,7 @@ szlaki-dziczy/
 
 ## 6. Etapy
 
-1. **MVP (ten etap)** — mapa testowa, ruch dotykowy (pad + tap), stworzenia widoczne na mapie, przejście do walki,
+1. **MVP (ten etap)** — mapa testowa, ruch dotykowy (joystick; tap-to-move wyłączony w Sprincie 1), stworzenia widoczne na mapie, przejście do walki,
    walka 1v1, 4 ruchy, typy, obrażenia, HP, statusy, łapanie, drużyna 6 + magazyn, EXP i poziomy, nauka ruchów,
    zapis w IndexedDB, PWA. Dodatkowo: towarzysz za graczem, sklep, Atlas, dziennik zadań, tryb offline.
 2. **Rozwój stworzeń i świat** — ewolucje (`/evolution-chain`), natury, ~40 najprostszych zdolności, przedmioty
