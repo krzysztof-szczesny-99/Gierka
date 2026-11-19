@@ -2,6 +2,8 @@
 // Nie zmieniają kodu gry; korzystają z trybu ?debug. Wynik każdej sondy: OK / PROBLEM / INFO / BŁĄD SONDY.
 // Od Sprintu 1 sondy są testem regresji: każdy PROBLEM lub BŁĄD SONDY kończy skrypt kodem ≠ 0.
 // (Sprint 1: pad → joystick, blokada spotkań w useUi zamiast pola sceny.)
+// (Sprint 2: zwykłe stworzenia nie chodzą po mapie — spotkania w sondach powstają w wysokiej trawie
+//  z kontrolowanym źródłem rzutu; poza tymi momentami rzut zawsze chybia, żeby ruch w sondach nie wywoływał walk.)
 // Użycie: node e2e/audit-probes.mjs http://localhost:4173/
 import { chromium } from 'playwright';
 
@@ -65,17 +67,38 @@ async function dpadPoint(dir) {
   const o = { up: [0, -45], down: [0, 45], left: [-45, 0], right: [45, 0] }[dir];
   return [b.x + b.width / 2 + o[0], b.y + b.height / 2 + o[1]];
 }
-async function startNearestEncounter() {
-  // Po poprzednim spotkaniu obowiązuje krótkie odnowienie — czekamy, aż minie.
-  await page.waitForFunction(() => { const u = window.__szlaki.stores.useUi.getState(); return u.gameMode === 'EXPLORATION' && performance.now() >= u.encounterCooldown; }, null, { timeout: 15000 });
-  return S(() => {
+/** Źródło rzutu na spotkanie: 'hit' (zawsze trafienie) albo 'miss' (nigdy). */
+const stepRng = (mode) => S((mode) => { const E = window.__szlaki.encounter; E.configure({ stepRng: E.createSequenceRng([mode === 'hit' ? 0 : 0.999]) }); }, mode);
+/** Spotkanie w wysokiej trawie: teleport obok trawy, kontrolowane trafienie, krok joystickiem. */
+async function grassEncounter() {
+  await page.waitForFunction(() => window.__szlaki.stores.useUi.getState().gameMode === 'EXPLORATION', null, { timeout: 15000 });
+  await stepRng('hit');
+  const t = await S(() => {
     const sc = window.__szlaki.game.scene.getScene('Overworld');
-    const d = (a) => Math.abs(a.tx - sc.tx) + Math.abs(a.ty - sc.ty);
-    const a = [...sc.actors].filter((x) => !x.removed && !x.engaged).sort((p, q) => d(p) - d(q))[0];
-    if (!a) return null;
-    sc.startEncounter(a);
-    return { id: a.id, name: a.spawn.creature.name, level: a.spawn.creature.level };
+    const D = { right: [1, 0], left: [-1, 0], down: [0, 1], up: [0, -1] };
+    for (let y = 1; y < sc.grid.length - 1; y++) for (let x = 1; x < sc.grid[0].length - 1; x++) {
+      if (!sc.isWalkable(x, y) || sc.actorAt(x, y)) continue;
+      for (const [d, [dx, dy]] of Object.entries(D)) {
+        if (sc.grid[y + dy]?.[x + dx] === ',' && !sc.actorAt(x + dx, y + dy)) {
+          window.__szlaki.stores.bus.emit('teleport', { x, y, facing: d });
+          return { dir: d, from: [x, y] };
+        }
+      }
+    }
+    return null;
   });
+  if (!t) throw new Error('brak wysokiej trawy');
+  await idle(300);
+  await S(() => window.__szlaki.stores.useUi.setState({ encounterCooldown: 0, encounterStepProgress: 0 }));
+  const [x, y] = await dpadPoint(t.dir);
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await idle(450);
+  const st = await S(() => window.__szlaki.stores.useUi.getState().gameMode);
+  await page.mouse.up();
+  await page.locator('.battle').waitFor({ timeout: 20000 });
+  await stepRng('miss');
+  return { ...t, stanPoKroku: st };
 }
 async function fightToEnd(preferStatus = false) {
   for (let i = 0; i < 900; i++) {
@@ -112,8 +135,9 @@ try {
   await closeDialogs();
   await waitHud();
   phase = 'spawn';
-  await waitActors(4);
-  record('S0', 'Start gry i pojawienie się stworzeń', 'INFO', await S(() => { const sc = window.__szlaki.game.scene.getScene('Overworld'); return { player: [sc.tx, sc.ty], actors: sc.actors.length, follower: !!sc.follower }; }));
+  await waitActors(1);
+  await stepRng('miss');
+  record('S0', 'Start gry: na mapie tylko nieruchome spotkanie specjalne, towarzysz', 'INFO', await S(() => { const sc = window.__szlaki.game.scene.getScene('Overworld'); return { player: [sc.tx, sc.ty], actors: sc.actors.map((a) => a.id), follower: !!sc.follower }; }));
 } catch (e) {
   record('S0', 'Start gry', 'BŁĄD SONDY', String(e).slice(0, 300));
 }
@@ -132,36 +156,33 @@ try {
     await idle(300);
     await page.locator('.modal-close').click();
   };
-  // Odradzanie stworzeń wstrzymane na czas pomiaru (tylko w teście), aby oddzielić zapytania menu od zapytań spawnów.
-  await S(() => { const sc = window.__szlaki.game.scene.getScene('Overworld'); sc.__origSpawn = sc.maintainSpawns; sc.maintainSpawns = () => {}; });
+  // Od Sprintu 2 nie ma odradzania stworzeń — pomiar dotyczy wyłącznie zapytań menu.
   await idle(2500);
   phase = 'menus-1';
   await openClose();
   phase = 'menus-2';
   await openClose();
-  const spawnsDuringModal = await S(() => { const sc = window.__szlaki.game.scene.getScene('Overworld'); sc.maintainSpawns = sc.__origSpawn; return true; });
+  const spawnsDuringModal = await S(() => typeof window.__szlaki.game.scene.getScene('Overworld').maintainSpawns === 'undefined');
   const first = api.filter((r) => r.phase === 'menus-1').map((r) => r.url);
   const second = api.filter((r) => r.phase === 'menus-2').map((r) => r.url);
-  record('P1', 'Ponowne otwarcie Drużyny/Torby/Atlasu/Dziennika nie wysyła zapytań do PokéAPI (odradzanie wstrzymane)', second.length === 0 ? 'OK' : 'PROBLEM', { pierwszeOtwarcie: first, drugieOtwarcie: second, przywrocono: spawnsDuringModal });
+  record('P1', 'Ponowne otwarcie Drużyny/Torby/Atlasu/Dziennika nie wysyła zapytań do PokéAPI', second.length === 0 ? 'OK' : 'PROBLEM', { pierwszeOtwarcie: first, drugieOtwarcie: second, brakOdradzania: spawnsDuringModal });
 } catch (e) {
   record('P1', 'Zapytania przy menu', 'BŁĄD SONDY', String(e).slice(0, 300));
 }
 
-// ───────────── 1b. Odradzanie i ruch stworzeń przy otwartym oknie ─────────────
+// ───────────── 1b. Brak odradzania i ruchu stworzeń (także przy otwartym oknie) ─────────────
 try {
   phase = 'modal-spawn';
-  const before = await S(() => { const sc = window.__szlaki.game.scene.getScene('Overworld'); return { n: sc.actors.length, ids: sc.actors.map((a) => a.id), pos: sc.actors.map((a) => `${a.tx},${a.ty}`) }; });
-  await S(() => { const sc = window.__szlaki.game.scene.getScene('Overworld'); const a = sc.actors[0]; if (a) sc.removeActor(a); });
+  const snap = () => S(() => { const sc = window.__szlaki.game.scene.getScene('Overworld'); return sc.actors.map((a) => `${a.id}@${a.tx},${a.ty}`); });
+  const before = await snap();
   await page.locator('.hud-menu button', { hasText: 'Atlas' }).click();
   await page.locator('.modal').waitFor();
   await idle(6000);
-  const during = await S(() => { const sc = window.__szlaki.game.scene.getScene('Overworld'); return { n: sc.actors.length, ids: sc.actors.map((a) => a.id), pos: sc.actors.map((a) => `${a.tx},${a.ty}`) }; });
+  const during = await snap();
   await page.locator('.modal-close').click();
-  const moved = during.ids.filter((id, i) => before.ids.includes(id) && before.pos[before.ids.indexOf(id)] !== during.pos[i]).length;
-  const newOnes = during.ids.filter((id) => !before.ids.includes(id)).length;
-  record('P15', 'Przy otwartym oknie: stworzenia stoją, a odradzanie działa dalej', 'INFO', { przed: before.n, poUsunieciuJednegoIOknie6s: during.n, noweStworzenia: newOnes, przesunieteStworzenia: moved });
+  record('P15', 'Stworzenia nie pojawiają się ani nie poruszają (6 s z otwartym oknem)', JSON.stringify(before) === JSON.stringify(during) ? 'OK' : 'PROBLEM', { przed: before, po6s: during });
 } catch (e) {
-  record('P15', 'Odradzanie przy oknie', 'BŁĄD SONDY', String(e).slice(0, 300));
+  record('P15', 'Brak odradzania', 'BŁĄD SONDY', String(e).slice(0, 300));
 }
 
 // ───────────── 2. Chodzenie: zapytania na krok ─────────────
@@ -299,45 +320,40 @@ try {
   record('P5c', 'Obrót po blur', 'BŁĄD SONDY', String(e).slice(0, 300));
 }
 
-// ───────────── 6. Blokada spotkań: dwa stworzenia naraz, ruch w przejściu, obce anulowanie ─────────────
+// ───────────── 6. Blokada spotkań: dwa triggery naraz, ruch w przejściu, obce zdarzenie ─────────────
 let firstBattleOk = false;
 try {
   phase = 'lock';
   await waitHud();
-  await waitActors(2);
-  await page.waitForFunction(() => { const u = window.__szlaki.stores.useUi.getState(); return u.gameMode === 'EXPLORATION' && performance.now() >= u.encounterCooldown; }, null, { timeout: 15000 });
   await S(() => { window.__enc = 0; window.__szlaki.stores.bus.on('encounter', () => { window.__enc += 1; }); });
-  const before = await pos();
+  const g = await grassEncounter();
+  const before = g.from.map((v, i) => v + (i === 0 ? { right: 1, left: -1 }[g.dir] ?? 0 : { down: 1, up: -1 }[g.dir] ?? 0));
   const started = await S(() => {
     const sc = window.__szlaki.game.scene.getScene('Overworld');
-    const dist = (a) => Math.abs(a.tx - sc.tx) + Math.abs(a.ty - sc.ty);
-    const [a1, a2] = [...sc.actors].filter((a) => !a.removed).sort((p, q) => dist(p) - dist(q));
-    sc.startEncounter(a1);
-    sc.startEncounter(a2); // ta sama klatka
+    const E = window.__szlaki.encounter;
+    const zone = sc.mapDef.zones.find((z) => z.id === 'meadow');
+    const again = window.__szlaki.stores.useUi.getState().registerEncounterStep({ movedToNewTile: true, zone }, E.createSequenceRng([0])); // drugi trigger
     const u = window.__szlaki.stores.useUi.getState();
-    return { a1: a1.id, a2: a2.id, lock: u.activeEncounterId, gameMode: u.gameMode, transition: u.transition, encounters: window.__enc };
+    return { drugiTrigger: { rzut: again.decision.rolled, spotkanie: again.encounterId }, lock: u.activeEncounterId, gameMode: u.gameMode, encounters: window.__enc };
   });
-  record('P6a', 'Dwa stworzenia w tej samej klatce uruchamiają tylko jedno spotkanie', started.encounters === 1 ? 'OK' : 'PROBLEM', started);
+  record('P6a', 'Dwa triggery (krok w trawie + kolejny krok) uruchamiają tylko jedno spotkanie', started.encounters === 1 && started.drugiTrigger.spotkanie === null ? 'OK' : 'PROBLEM', { ...g, ...started });
 
   await page.keyboard.down('ArrowLeft');
   await idle(600);
   await page.keyboard.up('ArrowLeft');
   const during = await pos();
-  record('P6b', 'Gracz nie porusza się podczas przejścia do walki', same(before, during) ? 'OK' : 'PROBLEM', { przed: before, wPrzejsciu: during });
+  record('P6b', 'Gracz nie porusza się podczas walki', same(before, during) ? 'OK' : 'PROBLEM', { poKroku: before, wWalce: during });
 
-  const foreign = await S((a2) => {
+  const foreign = await S(() => {
     const st = window.__szlaki.stores;
-    const sc = window.__szlaki.game.scene.getScene('Overworld');
-    const other = sc.actors.find((a) => a.id === a2);
     const ui = st.useUi.getState();
-    const ctxState = { mode: ui.mode, transition: ui.transition, lockPrzed: ui.activeEncounterId };
-    if (other) st.bus.emit('encounter', { actorId: other.id, spawn: other.spawn });
+    const ctxState = { mode: ui.mode, lockPrzed: ui.activeEncounterId };
+    st.bus.emit('encounter', { encounterId: 'enc-obce', source: { kind: 'step', locationId: 'x', zoneId: 'meadow', zoneName: 'Łąka', terrainType: 'TALL_GRASS', encounterTableId: 'meadow' } });
     const after = st.useUi.getState();
-    return { ...ctxState, lockPoObcymAnulowaniu: after.activeEncounterId, tenSam: after.activeEncounterId === ctxState.lockPrzed, pierwszaWalkaNadalTrwa: after.transition || after.mode === 'battle' };
-  }, started.a2);
-  record('P6c', 'Anulowanie innego spotkania nie zwalnia blokady trwającego spotkania', foreign.lockPoObcymAnulowaniu && foreign.tenSam ? 'OK' : 'PROBLEM', foreign);
+    return { ...ctxState, lockPoObcymZdarzeniu: after.activeEncounterId, tenSam: after.activeEncounterId === ctxState.lockPrzed, walkaTrwa: after.mode === 'battle' };
+  });
+  record('P6c', 'Obce zdarzenie spotkania nie zwalnia ani nie zmienia blokady trwającego spotkania', foreign.lockPoObcymZdarzeniu && foreign.tenSam ? 'OK' : 'PROBLEM', foreign);
 
-  await page.locator('.battle').waitFor({ timeout: 20000 });
   await idle(1500);
   const enc2 = await S(() => window.__enc);
   record('P6d', 'Brak ponownego wyzwolenia w kolejnych klatkach', 'INFO', { zdarzeniaEncounterLacznie: enc2, uwaga: 'w tym 1 sztuczne zdarzenie z sondy P6c' });
@@ -376,10 +392,7 @@ try {
 try {
   phase = 'flee';
   await waitHud();
-  await waitActors(1);
-  await S(() => { window.__enc = 0; });
-  const e = await startNearestEncounter();
-  await page.locator('.battle').waitFor({ timeout: 20000 });
+  const e = await grassEncounter();
   let outcome = null;
   for (let i = 0; i < 300 && !outcome; i++) {
     if (await page.getByRole('button', { name: 'Dalej' }).count()) { outcome = await S(() => window.__szlaki.stores.useBattle.getState().engine.outcome); break; }
@@ -391,16 +404,16 @@ try {
   await page.getByRole('button', { name: 'Dalej' }).click();
   await idle(400);
   await closeDialogs();
+  await stepRng('hit'); // nawet przy pewnym trafieniu stanie w miejscu nie może wywołać spotkania
   await S(() => { window.__enc = 0; });
   await idle(2500);
-  const st = await S((id) => {
-    const sc = window.__szlaki.game.scene.getScene('Overworld');
-    const a = sc.actors.find((x) => x.id === id);
+  const st = await S(() => {
     const u = window.__szlaki.stores.useUi.getState();
-    return { aktorIstnieje: !!a, engaged: a?.engaged, aggressive: a?.aggressive, cooldownMs: a ? Math.round(a.cooldownUntil - sc.time.now) : null, lock: u.inputLocked || u.gameMode !== 'EXPLORATION', petlaDziala: window.__szlaki.game.loop.running, noweSpotkaniaW2_5s: window.__enc };
-  }, e?.id);
-  const ok = outcome !== 'fled' || (st.aktorIstnieje && !st.engaged && !st.lock && st.petlaDziala && st.noweSpotkaniaW2_5s === 0);
-  record('P8', 'Ucieczka: powrót na mapę, stworzenie zostaje z odnowieniem, brak natychmiastowego ponownego spotkania', ok ? 'OK' : 'PROBLEM', { przeciwnik: e, wynik: outcome, ...st });
+    return { odnowienieKroki: u.encounterCooldown, lock: u.inputLocked || u.gameMode !== 'EXPLORATION', petlaDziala: window.__szlaki.game.loop.running, noweSpotkaniaW2_5s: window.__enc };
+  });
+  await stepRng('miss');
+  const ok = outcome !== 'fled' || (st.odnowienieKroki === 3 && !st.lock && st.petlaDziala && st.noweSpotkaniaW2_5s === 0);
+  record('P8', 'Ucieczka: powrót na mapę, odnowienie 3 kroki, brak spotkania bez ruchu', ok ? 'OK' : 'PROBLEM', { krok: e, wynik: outcome, ...st });
 } catch (e) {
   record('P8', 'Ucieczka', 'BŁĄD SONDY', String(e).slice(0, 300));
 }
@@ -409,11 +422,9 @@ try {
 try {
   phase = 'lose';
   await waitHud();
-  await waitActors(1);
   const before = await stats();
   await S(() => window.__szlaki.stores.useGame.setState((s) => ({ party: s.party.map((c) => ({ ...c, hp: 1 })) })));
-  const e = await startNearestEncounter();
-  await page.locator('.battle').waitFor({ timeout: 20000 });
+  const e = await grassEncounter();
   await fightToEnd(true);
   const outcome = await S(() => window.__szlaki.stores.useBattle.getState().engine.outcome);
   await page.getByRole('button', { name: 'Dalej' }).click();
@@ -421,13 +432,13 @@ try {
   await closeDialogs();
   await idle(500);
   const after = await stats();
-  const st = await S((id) => {
+  const st = await S(() => {
     const g = window.__szlaki.stores.useGame.getState();
     const sc = window.__szlaki.game.scene.getScene('Overworld');
-    return { pozycjaZapisu: [g.player.x, g.player.y], pozycjaSceny: [sc.tx, sc.ty], hp: g.party.map((c) => `${c.hp}/${c.stats.hp}`), aktorUsuniety: !sc.actors.some((a) => a.id === id) };
-  }, e?.id);
-  const ok = outcome !== 'lose' || (after.blackouts - before.blackouts === 1 && st.pozycjaZapisu[0] === 5 && st.pozycjaZapisu[1] === 6 && same(st.pozycjaSceny, st.pozycjaZapisu) && st.aktorUsuniety);
-  record('P9', 'Przegrana: leczenie, powrót do Stacji Opieki, usunięcie stworzenia', ok ? (outcome === 'lose' ? 'OK' : 'INFO') : 'PROBLEM', { przeciwnik: e, wynik: outcome, ...st, blackoutsPrzyrost: after.blackouts - before.blackouts });
+    return { pozycjaZapisu: [g.player.x, g.player.y], pozycjaSceny: [sc.tx, sc.ty], hp: g.party.map((c) => `${c.hp}/${c.stats.hp}`) };
+  });
+  const ok = outcome !== 'lose' || (after.blackouts - before.blackouts === 1 && st.pozycjaZapisu[0] === 5 && st.pozycjaZapisu[1] === 6 && same(st.pozycjaSceny, st.pozycjaZapisu));
+  record('P9', 'Przegrana: leczenie, powrót do Stacji Opieki', ok ? (outcome === 'lose' ? 'OK' : 'INFO') : 'PROBLEM', { krok: e, wynik: outcome, ...st, blackoutsPrzyrost: after.blackouts - before.blackouts });
 } catch (e) {
   record('P9', 'Przegrana', 'BŁĄD SONDY', String(e).slice(0, 300));
 }
@@ -463,11 +474,24 @@ try {
   if (title) {
     await page.getByRole('button', { name: /Kontynuuj/ }).click();
     await waitHud();
-    await idle(7000);
-    map = await S(() => { const sc = window.__szlaki.game.scene.getScene('Overworld'); return { stworzenia: sc.actors.length, towarzysz: !!sc.follower, online: navigator.onLine }; });
+    await idle(4000);
+    map = await S(() => { const sc = window.__szlaki.game.scene.getScene('Overworld'); return { towarzysz: !!sc.follower, online: navigator.onLine }; });
+    // Spotkanie w trawie offline: losowane wyłącznie gatunki z bufora (spotkane wcześniej w sondach).
+    const g = await grassEncounter();
+    map.spotkanieOffline = { ...g, przeciwnik: await S(() => window.__szlaki.stores.useBattle.getState().engine.sides[1].party[0].pokemon) };
+    for (let i = 0; i < 300; i++) {
+      if (await page.getByRole('button', { name: 'Dalej' }).count()) break;
+      const ph = await S(() => window.__szlaki.stores.useBattle.getState().phase);
+      if (ph === 'choose') await page.getByRole('button', { name: 'Ucieczka' }).click();
+      else if (ph === 'forcedSwitch') await page.locator('.creature-row:not([disabled])').first().click();
+      else { await S(() => window.__szlaki.stores.useBattle.getState().skip()); await idle(40); }
+    }
+    await page.getByRole('button', { name: 'Dalej' }).click();
+    await closeDialogs();
+    map.powrot = await S(() => window.__szlaki.stores.useUi.getState().gameMode);
   }
   await ctx.setOffline(false);
-  record('P11', 'Offline po pierwszym uruchomieniu: start, wczytanie, stworzenia z bufora', title && map && map.stworzenia > 0 ? 'OK' : 'PROBLEM', { serviceWorker: sw, ekranTytulowy: title, mapa: map });
+  record('P11', 'Offline po pierwszym uruchomieniu: start, wczytanie, towarzysz, spotkanie w trawie z bufora', title && map && map.towarzysz && map.spotkanieOffline && map.powrot === 'EXPLORATION' ? 'OK' : 'PROBLEM', { serviceWorker: sw, ekranTytulowy: title, mapa: map });
 } catch (e) {
   await ctx.setOffline(false).catch(() => {});
   record('P11', 'Offline', 'BŁĄD SONDY', String(e).slice(0, 300));

@@ -1,19 +1,21 @@
 // Scena eksploracji: mapa kafelkowa, ruch po siatce (joystick ekranowy, opcjonalnie klawiatura),
-// stworzenia widoczne na mapie (wędrują, część sama podchodzi), towarzysz za graczem, start spotkań.
-// Spotkanie zaczyna się wyłącznie przez centralną blokadę useUi.tryStartEncounter (startEncounter poniżej).
+// towarzysz za graczem, losowe spotkania po kroku w terenie (wysoka trawa, skalisty grunt) oraz
+// nieruchome spotkania specjalne (jedyne stworzenia widoczne na mapie — zwykłe dzikie stworzenia nie chodzą po mapie).
+// Spotkanie zaczyna się wyłącznie przez centralną blokadę: useUi.registerEncounterStep (po kroku) albo
+// useUi.tryStartEncounter (kontakt ze stworzeniem specjalnym).
 
 import * as Phaser from 'phaser';
-import { ACTOR_RETREAT_COOLDOWN_MS, ENCOUNTER_TABLES } from '../../config/encounters';
-import { isOnline } from '../../api/pokeapi';
-import { getPokemon, isPokemonCached } from '../../data/repository';
-import { gameRng } from '../../engine/rng';
+import { ENCOUNTER_CONFIG } from '../../config/encounters';
+import { getPokemon } from '../../data/repository';
 import type { Dir } from '../../engine/types';
-import { buildWild, type WildSpawn } from '../../services/creatureService';
+import type { WildSpawn } from '../../services/creatureService';
+import { buildStaticSpawn, encounterStepRng } from '../../services/encounterService';
 import { leadCreature, useGame } from '../../state/gameStore';
 import { isOverworldBlocked, useUi } from '../../state/uiStore';
+import { activeStaticEncounters, encounterZoneAt } from '../encounterZones';
 import { bus, type EncounterOutcome } from '../eventBus';
 import { consumeAction, releaseInput, resetVirtualInput, virtualInput } from '../input';
-import { MAPS, TEST_MAP, type MapDef, type ZoneDef } from '../maps/testMap';
+import { MAPS, TEST_MAP, type MapDef, type StaticEncounterDef, type ZoneDef } from '../maps/testMap';
 import {
   charAt,
   DIRS,
@@ -33,20 +35,15 @@ const MIGHTY_SCALE = 0.6;
 const FOLLOWER_SCALE = 0.36;
 const BLOB_SCALE = 0.75;
 
-interface WildActor {
+/** Widoczne, nieruchome stworzenie specjalne (nie wędruje i nie goni gracza). */
+interface StaticActor {
   id: string;
-  zone: ZoneDef;
+  def: StaticEncounterDef;
   spawn: WildSpawn;
   tx: number;
   ty: number;
   container: Phaser.GameObjects.Container;
   image: Phaser.GameObjects.Image;
-  moving: boolean;
-  nextThink: number;
-  aggressive: boolean;
-  noticed: boolean;
-  /** Czas sceny, do którego stworzenie nie goni gracza; < 0 = ustaw odnowienie w najbliższej klatce po walce. */
-  cooldownUntil: number;
   engaged: boolean;
   removed: boolean;
 }
@@ -79,10 +76,7 @@ export class OverworldScene extends Phaser.Scene {
   private followerTile: Point | null = null;
   private followerKey = '';
   private followerReq = 0;
-  private actors: WildActor[] = [];
-  private actorSeq = 0;
-  private spawning = new Set<string>();
-  private zoneTiles = new Map<string, Point[]>();
+  private actors: StaticActor[] = [];
   private cursors: Phaser.Types.Input.Keyboard.CursorKeys | null = null;
   private keyAction: Phaser.Input.Keyboard.Key | null = null;
   private keyRun: Phaser.Input.Keyboard.Key | null = null;
@@ -109,8 +103,6 @@ export class OverworldScene extends Phaser.Scene {
     const tileset = map.addTilesetImage(TILESET_KEY, TILESET_KEY, TILE_SIZE, TILE_SIZE, 0, 0);
     if (tileset) this.layer = map.createLayer(0, tileset, 0, 0);
     this.layer?.setDepth(0);
-
-    for (const zone of this.mapDef.zones) this.zoneTiles.set(zone.id, this.collectZoneTiles(zone));
 
     // Gracz
     this.tx = g.player.x;
@@ -143,10 +135,10 @@ export class OverworldScene extends Phaser.Scene {
       this.keyRun = kb.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
     }
 
-    // Animacja wody i odradzanie stworzeń
+    // Animacja wody; spotkania specjalne (jedyne widoczne stworzenia, nieruchome); kroki ochronne po wejściu na mapę.
     this.time.addEvent({ delay: 650, loop: true, callback: () => this.animateWater() });
-    this.time.addEvent({ delay: 1800, loop: true, callback: () => this.maintainSpawns() });
-    this.maintainSpawns();
+    this.spawnStaticEncounters();
+    useUi.getState().protectSteps(ENCOUNTER_CONFIG.mapEnterSafeSteps);
 
     // Towarzysz (prowadzący drużynę)
     this.refreshFollower();
@@ -190,10 +182,7 @@ export class OverworldScene extends Phaser.Scene {
       return;
     }
 
-    // Zawsze zegar sceny (this.time.now) — spójnie z czasami ustawianymi przy tworzeniu stworzeń.
-    this.updateActors(this.time.now);
-    // Spotkanie mogło się zacząć w tej klatce (pościg) — wtedy ruch jest już zablokowany.
-    if (this.moving || isOverworldBlocked()) return;
+    if (this.moving) return;
 
     const actionPressed = consumeAction() || (this.keyAction ? Phaser.Input.Keyboard.JustDown(this.keyAction) : false);
     if (actionPressed) {
@@ -274,6 +263,10 @@ export class OverworldScene extends Phaser.Scene {
     const g = useGame.getState();
     g.setPosition(this.tx, this.ty, this.facing);
     g.addStep();
+    // Losowe spotkanie: sprawdzane wyłącznie po wejściu na nowe pole (najwyżej jeden rzut na krok).
+    const zone = encounterZoneAt(this.mapDef, this.grid, this.tx, this.ty, useGame.getState().flags);
+    const { encounterId } = useUi.getState().registerEncounterStep({ movedToNewTile: true, zone }, encounterStepRng());
+    if (encounterId && zone) this.beginStepEncounter(encounterId, zone);
   }
 
   private setHeroFrame(walking: boolean): void {
@@ -296,6 +289,8 @@ export class OverworldScene extends Phaser.Scene {
     this.setHeroFrame(false);
     this.cameras.main.centerOn(this.player.x, this.player.y);
     this.placeFollowerBehind();
+    // Przeniesienie (np. do Stacji Opieki) = wejście w nowe miejsce: kroki ochronne.
+    useUi.getState().protectSteps(ENCOUNTER_CONFIG.mapEnterSafeSteps);
   }
 
   // ───────────────────────────── interakcje ─────────────────────────────
@@ -331,26 +326,47 @@ export class OverworldScene extends Phaser.Scene {
 
   // ───────────────────────────── spotkania ─────────────────────────────
 
+  /** Wejście w spotkanie (blokada już przejęta): natychmiastowe zatrzymanie wejścia i efekt przejścia. */
+  private lockInputForEncounter(): void {
+    releaseInput('lock');
+    this.input.keyboard?.resetKeys();
+    this.setHeroFrame(false);
+    const cam = this.cameras.main;
+    cam.flash(220, 255, 255, 255);
+    cam.shake(180, 0.004);
+  }
+
+  /** Spotkanie wylosowane po kroku — blokadę przejęło już useUi.registerEncounterStep. */
+  private beginStepEncounter(encounterId: string, zone: ZoneDef): void {
+    if (this.disposed) return;
+    this.lockInputForEncounter();
+    bus.emit('encounter', {
+      encounterId,
+      source: {
+        kind: 'step',
+        locationId: zone.locationId,
+        zoneId: zone.id,
+        zoneName: zone.name,
+        terrainType: zone.terrainType,
+        encounterTableId: zone.encounterTableId,
+      },
+    });
+  }
+
   /**
-   * Jedyne miejsce, z którego mapa zgłasza spotkanie (kontakt przy kroku, przycisk A, pościg stworzenia).
+   * Kontakt ze stworzeniem specjalnym (wejście w nie albo przycisk A).
    * Najpierw przejmuje centralną blokadę — gdy się nie uda (trwa inne spotkanie, odnowienie, okno), nic nie robi.
    */
-  private startEncounter(actor: WildActor): boolean {
+  private startEncounter(actor: StaticActor): boolean {
     if (this.disposed || actor.removed || actor.engaged) return false;
     const encounterId = useUi.getState().tryStartEncounter(actor.id);
     if (!encounterId) return false;
     actor.engaged = true;
-    // Natychmiastowe zatrzymanie wejścia: joystick odpina palec, klawisze zostają wyzerowane.
-    releaseInput('lock');
-    this.input.keyboard?.resetKeys();
     const d = dirBetween(this.tx, this.ty, actor.tx, actor.ty);
     if (d) this.facing = d;
-    this.setHeroFrame(false);
+    this.lockInputForEncounter();
     this.showAlert(actor);
-    const cam = this.cameras.main;
-    cam.flash(220, 255, 255, 255);
-    cam.shake(180, 0.004);
-    bus.emit('encounter', { encounterId, actorId: actor.id, spawn: actor.spawn });
+    bus.emit('encounter', { encounterId, source: { kind: 'static', actorId: actor.id, staticId: actor.def.id, spawn: actor.spawn } });
     return true;
   }
 
@@ -359,68 +375,29 @@ export class OverworldScene extends Phaser.Scene {
     this.lastBump = null;
     const a = this.actors.find((x) => x.id === actorId);
     if (!a) return;
-    if (outcome === 'win' || outcome === 'caught' || outcome === 'lose') {
-      this.removeActor(a);
-    } else {
-      a.engaged = false;
-      a.aggressive = false;
-      a.noticed = false;
-      // Pętla Phasera śpi podczas walki, więc czas sceny jest nieaktualny — odnowienie liczymy od pierwszej klatki po powrocie.
-      a.cooldownUntil = -1;
+    // Po wygranej lub złapaniu stworzenie specjalne znika na stałe (flaga w zapisie); inaczej zostaje na miejscu.
+    if (outcome === 'win' || outcome === 'caught') this.removeActor(a);
+    else a.engaged = false;
+  }
+
+  // ───────────────────────────── stworzenia specjalne ─────────────────────────────
+
+  private spawnStaticEncounters(): void {
+    const flags = useGame.getState().flags;
+    for (const def of activeStaticEncounters(this.mapDef, flags)) {
+      const zoneName = this.mapDef.zones.find((z) => z.id === def.zoneId)?.name ?? this.mapDef.name;
+      buildStaticSpawn(def, zoneName)
+        .then(async (spawn) => {
+          if (this.disposed) return;
+          const tex = await ensureCreatureTexture(this, spawn.pokemon, spawn.creature.shiny, useGame.getState().settings.useApiSprites);
+          if (this.disposed || this.actors.some((a) => a.def.id === def.id)) return;
+          this.createActor(def, spawn, tex);
+        })
+        .catch((e) => console.warn('Nie udało się przygotować spotkania specjalnego', e));
     }
   }
 
-  // ───────────────────────────── dzikie stworzenia ─────────────────────────────
-
-  private collectZoneTiles(zone: ZoneDef): Point[] {
-    const out: Point[] = [];
-    for (let y = zone.rect.y; y < zone.rect.y + zone.rect.h; y++) {
-      for (let x = zone.rect.x; x < zone.rect.x + zone.rect.w; x++) {
-        if (zone.spawnTiles.includes(this.charAt(x, y))) out.push({ x, y });
-      }
-    }
-    return out;
-  }
-
-  private maintainSpawns(): void {
-    if (this.disposed || useUi.getState().gameMode !== 'EXPLORATION') return;
-    for (const zone of this.mapDef.zones) {
-      const count = this.actors.filter((a) => a.zone.id === zone.id && !a.removed).length;
-      if (count >= zone.maxActive || this.spawning.has(zone.id)) continue;
-      this.spawning.add(zone.id);
-      this.spawnInZone(zone)
-        .catch((e) => console.warn('Nie udało się utworzyć stworzenia', e))
-        .finally(() => this.spawning.delete(zone.id));
-    }
-  }
-
-  private async spawnInZone(zone: ZoneDef): Promise<void> {
-    const table = ENCOUNTER_TABLES[zone.table];
-    if (!table) return;
-    let entries = table.entries;
-    if (!isOnline()) {
-      const cached = await Promise.all(entries.map((e) => isPokemonCached(e.pokemon)));
-      entries = entries.filter((_, i) => cached[i]);
-      if (!entries.length) return;
-    }
-    const entry = gameRng.weighted(entries);
-    const spawn = await buildWild(entry, table, zone, gameRng);
-    if (this.disposed) return;
-    const tex = await ensureCreatureTexture(this, spawn.pokemon, spawn.creature.shiny, useGame.getState().settings.useApiSprites);
-    if (this.disposed) return;
-    const tile = this.pickSpawnTile(zone);
-    if (!tile) return;
-    this.createActor(zone, spawn, tile, tex);
-  }
-
-  private pickSpawnTile(zone: ZoneDef): Point | null {
-    const candidates = (this.zoneTiles.get(zone.id) ?? []).filter(
-      (p) => this.isFreeForActor(p.x, p.y) && Math.abs(p.x - this.tx) + Math.abs(p.y - this.ty) >= 4,
-    );
-    return candidates.length ? gameRng.pick(candidates) : null;
-  }
-
-  private createActor(zone: ZoneDef, spawn: WildSpawn, tile: Point, tex: CreatureTexture): void {
+  private createActor(def: StaticEncounterDef, spawn: WildSpawn, tex: CreatureTexture): void {
     const mighty = spawn.creature.mighty;
     const parts: Phaser.GameObjects.GameObject[] = [this.add.ellipse(0, -1, 14, 5, 0x000000, 0.25)];
     let aura: Phaser.GameObjects.Ellipse | null = null;
@@ -434,32 +411,19 @@ export class OverworldScene extends Phaser.Scene {
       .setOrigin(0.5, tex.isBlob ? 1 : 0.92)
       .setScale(scale);
     parts.push(image);
-    const container = this.add.container(tileCenterX(tile.x), tileBottomY(tile.y), parts);
-    container.setDepth(tileBottomY(tile.y) + 5);
+    const container = this.add.container(tileCenterX(def.x), tileBottomY(def.y), parts);
+    container.setDepth(tileBottomY(def.y) + 5);
     container.setAlpha(0);
     this.tweens.add({ targets: container, alpha: 1, duration: 350 });
     if (aura) this.tweens.add({ targets: aura, alpha: 0.15, duration: 700, yoyo: true, repeat: -1 });
     if (spawn.creature.shiny) this.tweens.add({ targets: image, alpha: 0.6, duration: 260, yoyo: true, repeat: 3 });
 
-    this.actors.push({
-      id: `wild-${++this.actorSeq}`,
-      zone,
-      spawn,
-      tx: tile.x,
-      ty: tile.y,
-      container,
-      image,
-      moving: false,
-      nextThink: this.time.now + gameRng.int(500, 1800),
-      aggressive: spawn.aggressive,
-      noticed: false,
-      cooldownUntil: 0,
-      engaged: false,
-      removed: false,
-    });
+    this.actors.push({ id: `static:${def.id}`, def, spawn, tx: def.x, ty: def.y, container, image, engaged: false, removed: false });
+    // Towarzysz nie może stać na polu stworzenia.
+    if (this.followerTile && this.followerTile.x === def.x && this.followerTile.y === def.y) this.placeFollowerBehind();
   }
 
-  private removeActor(a: WildActor): void {
+  private removeActor(a: StaticActor): void {
     if (a.removed) return;
     a.removed = true;
     this.tweens.killTweensOf(a.container);
@@ -472,70 +436,7 @@ export class OverworldScene extends Phaser.Scene {
     this.actors = this.actors.filter((x) => x !== a);
   }
 
-  private updateActors(time: number): void {
-    for (const a of this.actors) {
-      if (a.cooldownUntil < 0) {
-        a.cooldownUntil = time + ACTOR_RETREAT_COOLDOWN_MS;
-        a.nextThink = time + 300;
-      }
-      if (a.removed || a.moving || a.engaged || time < a.nextThink) continue;
-      const dist = Math.abs(a.tx - this.tx) + Math.abs(a.ty - this.ty);
-      const chasing = a.aggressive && time >= a.cooldownUntil && dist <= 4;
-      if (chasing && !a.noticed) {
-        a.noticed = true;
-        this.showAlert(a);
-        a.nextThink = time + 550;
-        continue;
-      }
-      if (!chasing && dist > 6) a.noticed = false;
-
-      let dir: Dir | null = null;
-      if (chasing) {
-        const dx = this.tx - a.tx;
-        const dy = this.ty - a.ty;
-        const primary: Dir = Math.abs(dx) >= Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : dy > 0 ? 'down' : 'up';
-        const secondary: Dir | null = Math.abs(dx) >= Math.abs(dy) ? (dy === 0 ? null : dy > 0 ? 'down' : 'up') : dx === 0 ? null : dx > 0 ? 'right' : 'left';
-        dir = primary;
-        const px = a.tx + DIRS[primary].x;
-        const py = a.ty + DIRS[primary].y;
-        const hitsPlayer = px === this.tx && py === this.ty;
-        if (!hitsPlayer && !this.canActorEnter(a, px, py, true) && secondary) dir = secondary;
-      } else if (gameRng.chance(0.65)) {
-        dir = gameRng.pick(['up', 'down', 'left', 'right'] as const);
-      }
-      a.nextThink = time + (chasing ? 420 : gameRng.int(900, 2400));
-      if (!dir) continue;
-
-      const nx = a.tx + DIRS[dir].x;
-      const ny = a.ty + DIRS[dir].y;
-      if (nx === this.tx && ny === this.ty) {
-        if (chasing && !this.moving && this.startEncounter(a)) return;
-        continue;
-      }
-      if (!this.canActorEnter(a, nx, ny, chasing)) continue;
-      this.moveActor(a, nx, ny, chasing ? 200 : 280);
-    }
-  }
-
-  private moveActor(a: WildActor, nx: number, ny: number, duration: number): void {
-    if (nx !== a.tx) a.image.setFlipX(nx > a.tx); // sprite'y „frontowe” patrzą zwykle w lewo
-    a.tx = nx;
-    a.ty = ny;
-    a.moving = true;
-    a.container.setDepth(tileBottomY(ny) + 5);
-    this.tweens.add({
-      targets: a.container,
-      x: tileCenterX(nx),
-      y: tileBottomY(ny),
-      duration,
-      onComplete: () => {
-        a.moving = false;
-      },
-    });
-    this.tweens.add({ targets: a.image, y: -3, duration: duration / 2, yoyo: true });
-  }
-
-  private showAlert(a: WildActor): void {
+  private showAlert(a: StaticActor): void {
     const t = this.add
       .text(a.container.x, a.container.y - 30, '!', {
         fontFamily: 'system-ui, sans-serif',
@@ -551,22 +452,7 @@ export class OverworldScene extends Phaser.Scene {
     this.time.delayedCall(800, () => t.destroy());
   }
 
-  private canActorEnter(a: WildActor, x: number, y: number, chasing: boolean): boolean {
-    if (!this.isFreeForActor(x, y)) return false;
-    const r = a.zone.rect;
-    const margin = chasing ? 3 : 0;
-    return x >= r.x - margin && x < r.x + r.w + margin && y >= r.y - margin && y < r.y + r.h + margin;
-  }
-
-  private isFreeForActor(x: number, y: number): boolean {
-    if (!this.isWalkable(x, y)) return false;
-    if (x === this.tx && y === this.ty) return false;
-    if (this.followerTile && this.followerTile.x === x && this.followerTile.y === y) return false;
-    if (this.mapDef.doors[`${x},${y - 1}`]) return false; // nie blokuj wejść do budynków
-    return !this.actorAt(x, y);
-  }
-
-  private actorAt(x: number, y: number): WildActor | undefined {
+  private actorAt(x: number, y: number): StaticActor | undefined {
     return this.actors.find((a) => !a.removed && a.tx === x && a.ty === y);
   }
 

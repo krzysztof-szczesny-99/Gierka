@@ -2,7 +2,10 @@
 // oraz centralna blokada spotkań (jedyne miejsce, które decyduje, czy spotkanie może się zacząć).
 
 import { create } from 'zustand';
+import type { Rng } from '../engine/rng';
+import { evaluateEncounterStep, type StepDecision } from '../game/encounterZones';
 import type { EncounterOutcome } from '../game/eventBus';
+import type { ZoneDef } from '../game/maps/testMap';
 import type { MoveData } from '../engine/types';
 
 export type Mode = 'boot' | 'title' | 'starter' | 'overworld' | 'battle';
@@ -67,22 +70,38 @@ interface UiStore {
   sourceEntityId: string | null;
   /** Wejście (joystick, klawiatura, przycisk A) jest ignorowane przez scenę. */
   inputLocked: boolean;
-  /** Do kiedy (ms wg encounterClock) nie może zacząć się kolejne spotkanie; 0 = brak odnowienia. */
+  /** Odnowienie w krokach: tyle poprawnych kroków musi minąć, zanim spotkanie znów będzie możliwe; 0 = brak. */
   encounterCooldown: number;
+  /** Kroki zebrane w terenie od ostatniego losowania (strefy ze stepDistance > 1). */
+  encounterStepProgress: number;
+  /** Liczba wykonanych rzutów na spotkanie (diagnostyka i testy). */
+  encounterRollCount: number;
+  /** Ostatnia decyzja po kroku (diagnostyka i testy). */
+  lastStepDecision: StepDecision | null;
   /** Ostatnie zakończone spotkanie (diagnostyka i testy). */
   lastEncounter: EncounterRecord | null;
   /**
    * Jedyna operacja rozpoczynająca spotkanie. Atomowo (synchronicznie, bez await) sprawdza stan EXPLORATION,
    * brak aktywnego spotkania i odnowienie, przejmuje blokadę i zwraca identyfikator spotkania — albo null.
    */
-  tryStartEncounter(sourceEntityId: string, now?: number): string | null;
+  tryStartEncounter(sourceEntityId: string): string | null;
+  /**
+   * Krok gracza na nowe pole: aktualizuje odnowienie i dystans, wykonuje najwyżej jeden rzut, a przy trafieniu
+   * od razu przejmuje blokadę (tryStartEncounter). Zwraca decyzję i identyfikator spotkania albo null.
+   */
+  registerEncounterStep(
+    input: { movedToNewTile: boolean; zone: ZoneDef | null },
+    rng: Rng,
+  ): { decision: StepDecision; encounterId: string | null };
+  /** Kroki ochronne (np. po wejściu na mapę): odnowienie co najmniej n kroków. */
+  protectSteps(n: number): void;
   /** ENCOUNTER_STARTING → BATTLE (tylko dla bieżącego spotkania). */
   confirmBattle(encounterId: string): boolean;
   /** ENCOUNTER_STARTING/BATTLE → ENCOUNTER_ENDING. Zwraca true dokładnie raz dla danego spotkania. */
   beginEncounterEnd(encounterId: string): boolean;
   /** Czyści activeEncounterId i źródło (stan pozostaje ENCOUNTER_ENDING) i zapisuje wynik. */
   releaseEncounter(encounterId: string, outcome: EncounterOutcome, reason: EncounterEndReason): boolean;
-  setEncounterCooldown(until: number): void;
+  setEncounterCooldown(steps: number): void;
   /** ENCOUNTER_ENDING (po zwolnieniu spotkania) → EXPLORATION i odblokowanie wejścia. */
   enterExploration(): boolean;
   /** Twardy powrót do EXPLORATION (nowa scena mapy). */
@@ -120,13 +139,16 @@ export const useUi = create<UiStore>()((set, get) => ({
   sourceEntityId: null,
   inputLocked: false,
   encounterCooldown: 0,
+  encounterStepProgress: 0,
+  encounterRollCount: 0,
+  lastStepDecision: null,
   lastEncounter: null,
 
-  tryStartEncounter: (sourceEntityId, now = encounterClock()) => {
+  tryStartEncounter: (sourceEntityId) => {
     const s = get();
     if (s.mode !== 'overworld') return null;
     if (s.gameMode !== 'EXPLORATION' || s.activeEncounterId !== null) return null;
-    if (now < s.encounterCooldown) return null;
+    if (s.encounterCooldown > 0) return null;
     if (s.modal !== null || s.dialog !== null || s.transition || s.learnQueue.length > 0) return null;
     const id = `enc-${++encounterSeq}`;
     set({ gameMode: 'ENCOUNTER_STARTING', activeEncounterId: id, sourceEntityId, inputLocked: true });
@@ -159,7 +181,33 @@ export const useUi = create<UiStore>()((set, get) => ({
     return true;
   },
 
-  setEncounterCooldown: (until) => set({ encounterCooldown: until }),
+  registerEncounterStep: (input, rng) => {
+    const s = get();
+    // Przy otwartym oknie, dialogu lub przejściu krok nie losuje (i nie może przejąć blokady).
+    const uiBusy = s.mode !== 'overworld' || s.modal !== null || s.dialog !== null || s.transition || s.learnQueue.length > 0;
+    const decision = evaluateEncounterStep(
+      {
+        gameMode: uiBusy ? 'BLOCKED' : s.gameMode,
+        activeEncounterId: s.activeEncounterId,
+        cooldown: s.encounterCooldown,
+        progress: s.encounterStepProgress,
+      },
+      input,
+      rng,
+    );
+    set({
+      encounterCooldown: decision.cooldown,
+      encounterStepProgress: decision.progress,
+      encounterRollCount: s.encounterRollCount + (decision.rolled ? 1 : 0),
+      lastStepDecision: decision,
+    });
+    const encounterId = decision.hit && input.zone ? get().tryStartEncounter(`${input.zone.locationId}:${input.zone.terrainType}`) : null;
+    return { decision, encounterId };
+  },
+
+  protectSteps: (n) => set((s) => ({ encounterCooldown: Math.max(s.encounterCooldown, n), encounterStepProgress: 0 })),
+
+  setEncounterCooldown: (steps) => set({ encounterCooldown: Math.max(0, Math.floor(steps)) }),
 
   enterExploration: () => {
     const s = get();

@@ -1,4 +1,6 @@
-// Definicje kafelków mapy (znak ASCII → indeks w proceduralnym tilesecie + właściwości).
+// Definicje kafelków mapy (znak ASCII → indeks w proceduralnym tilesecie + właściwości, w tym teren spotkań).
+
+import type { TerrainType } from '../config/encounters';
 
 export const TILE_SIZE = 16;
 
@@ -9,17 +11,19 @@ export interface TileDef {
   solid: boolean;
   kind?: TileKind;
   label: string;
+  /** Teren spotkań (domyślnie NONE — brak losowych spotkań). */
+  terrain?: TerrainType;
 }
 
 export const TILE_DEFS: Record<string, TileDef> = {
   '.': { index: 0, solid: false, label: 'trawa' },
-  ',': { index: 1, solid: false, kind: 'tall', label: 'wysoka trawa' },
+  ',': { index: 1, solid: false, kind: 'tall', label: 'wysoka trawa', terrain: 'TALL_GRASS' },
   '=': { index: 2, solid: false, kind: 'path', label: 'ścieżka' },
-  '~': { index: 3, solid: true, kind: 'water', label: 'woda' },
+  '~': { index: 3, solid: true, kind: 'water', label: 'woda', terrain: 'WATER' }, // na razie niedostępna (brak pływania)
   s: { index: 5, solid: false, label: 'piasek' },
   T: { index: 6, solid: true, label: 'drzewo' },
   R: { index: 7, solid: true, label: 'głaz' },
-  r: { index: 8, solid: false, label: 'skalisty grunt' },
+  r: { index: 8, solid: false, label: 'skalisty grunt', terrain: 'CAVE' },
   f: { index: 9, solid: false, label: 'kwiaty' },
   C: { index: 10, solid: true, label: 'dach Stacji Opieki' },
   c: { index: 11, solid: true, label: 'godło Stacji Opieki' },

@@ -57,7 +57,8 @@ try {
     };
   });
   log('stan mapy', JSON.stringify(info));
-  if (!info.actors.length) problems.push('BRAK stworzeń na mapie po 9 s');
+  // Sprint 2: zwykłe stworzenia nie chodzą po mapie — widoczne jest tylko nieruchome spotkanie specjalne.
+  if (info.actors.length !== 1) problems.push(`Na mapie powinno stać tylko spotkanie specjalne, jest: ${info.actors.length}`);
   if (!info.follower) problems.push('BRAK towarzysza');
 
   // Klawiatura: 3 kroki w dół
@@ -96,34 +97,34 @@ try {
   if (afterTap[0] !== afterPad[0] || afterTap[1] !== afterPad[1]) problems.push('Dotknięcie mapy poruszyło postać (tap-to-move powinien być wyłączony)');
   await shot('03-moved');
 
-  // Spotkanie: realny kontakt — stworzenie obok gracza, gracz wchodzi w nie joystickiem
+  // Spotkanie: losowe w wysokiej trawie — kontrolowany rzut „trafienie”, gracz robi joystickiem krok w trawę
   const started = await scene(() => {
     const sc = window.__szlaki.game.scene.getScene('Overworld');
-    sc.updateActors = () => {}; // na czas ustawienia scenariusza stworzenia stoją
+    const E = window.__szlaki.encounter;
+    E.configure({ stepRng: E.createSequenceRng([0]) });
     const D = { right: [1, 0], left: [-1, 0], down: [0, 1], up: [0, -1] };
-    const a = sc.actors.find((x) => !x.removed && !x.engaged);
-    if (!a) return null;
-    for (const [d, [dx, dy]] of Object.entries(D)) {
-      const x = sc.tx + dx, y = sc.ty + dy;
-      const fol = sc.followerTile && sc.followerTile.x === x && sc.followerTile.y === y;
-      if (sc.isWalkable(x, y) && !sc.actorAt(x, y) && !fol) {
-        sc.tweens.killTweensOf(a.container);
-        a.tx = x; a.ty = y; a.moving = false;
-        a.container.setPosition(x * 16 + 8, (y + 1) * 16);
-        return { name: a.spawn.creature.name, dir: d };
+    for (let y = 1; y < sc.grid.length - 1; y++) for (let x = 1; x < sc.grid[0].length - 1; x++) {
+      if (!sc.isWalkable(x, y) || sc.actorAt(x, y)) continue;
+      for (const [d, [dx, dy]] of Object.entries(D)) {
+        if (sc.grid[y + dy]?.[x + dx] === ',' && !sc.actorAt(x + dx, y + dy)) {
+          window.__szlaki.stores.bus.emit('teleport', { x, y, facing: d });
+          window.__szlaki.stores.useUi.setState({ encounterCooldown: 0 });
+          return { dir: d, from: [x, y] };
+        }
       }
     }
     return null;
   });
-  log('spotkanie z', JSON.stringify(started));
+  log('krok w trawę', JSON.stringify(started));
   if (started) {
+    await page.waitForTimeout(300);
     const off = { up: [0, -45], down: [0, 45], left: [-45, 0], right: [45, 0] }[started.dir];
     const jb = await page.locator('.joystick').boundingBox();
     await page.mouse.move(jb.x + jb.width / 2 + off[0], jb.y + jb.height / 2 + off[1]);
     await page.mouse.down();
     await page.waitForTimeout(500);
     await page.mouse.up();
-    await scene(() => { delete window.__szlaki.game.scene.getScene('Overworld').updateActors; });
+    await scene(() => { const E = window.__szlaki.encounter; E.configure({ stepRng: E.createSequenceRng([0.999]) }); });
   }
   if (started) {
     await page.locator('.battle').waitFor({ timeout: 20000 });

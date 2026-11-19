@@ -2,12 +2,12 @@
 // Dane, zapis, losowość i czas są wstrzyknięte (configureEncounterDeps) — bez sieci i IndexedDB.
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ENCOUNTER_COOLDOWN_MS } from '../../config/encounters';
+import { ENCOUNTER_CONFIG, staticDoneFlag } from '../../config/encounters';
 import { chart, growthMedium, makeCreature, makeSpecies, moves } from '../../engine/__tests__/fixtures';
 import type { BattleOutcome } from '../../engine/battle/types';
-import { createRng } from '../../engine/rng';
+import { createRng, createSequenceRng } from '../../engine/rng';
 import type { Creature, MoveData, PokemonData } from '../../engine/types';
-import { bus, type BusEvents } from '../../game/eventBus';
+import { bus, type BusEvents, type EncounterSource } from '../../game/eventBus';
 import { joystick, joystickDown, releaseInput, virtualInput } from '../../game/input';
 import { TEST_MAP } from '../../game/maps/testMap';
 import { useBattle } from '../../state/battleStore';
@@ -15,6 +15,7 @@ import { useGame } from '../../state/gameStore';
 import { isOverworldBlocked, useUi } from '../../state/uiStore';
 import type { WildSpawn } from '../creatureService';
 import { cancelEncounter, configureEncounterDeps, finishBattle, startWildEncounter } from '../encounterService';
+import type { StepEncounterSource } from '../../game/eventBus';
 
 const rng = createRng(7);
 const hero = makeCreature(rng, 'flamy', ['fire'], 12, ['tackle', 'growl']);
@@ -26,8 +27,9 @@ const SPAWN: WildSpawn = {
   species: makeSpecies('leafy', 255),
   zoneId: 'meadow',
   zoneName: 'Łąka',
-  aggressive: false,
 };
+/** Źródło: widoczne stworzenie specjalne (kontakt) — jak na mapie. */
+const staticSource = (actorId: string, staticId = 'test-static'): EncounterSource => ({ kind: 'static', actorId, staticId, spawn: SPAWN });
 
 let now = 10_000;
 let saves = 0;
@@ -90,6 +92,9 @@ beforeEach(() => {
     sourceEntityId: null,
     inputLocked: false,
     encounterCooldown: 0,
+    encounterStepProgress: 0,
+    encounterRollCount: 0,
+    lastStepDecision: null,
     lastEncounter: null,
   });
   releaseInput('reset');
@@ -106,9 +111,9 @@ afterEach(() => {
 
 /** Kontakt ze stworzeniem: centralna blokada + inicjalizacja walki (jak po zdarzeniu „encounter” z mapy). */
 async function startBattle(source = 'wild-1'): Promise<string> {
-  const id = useUi.getState().tryStartEncounter(source, now);
+  const id = useUi.getState().tryStartEncounter(source);
   expect(id).not.toBeNull();
-  const ok = await startWildEncounter({ encounterId: id!, actorId: source, spawn: SPAWN });
+  const ok = await startWildEncounter({ encounterId: id!, source: staticSource(source) });
   expect(ok).toBe(true);
   return id!;
 }
@@ -131,7 +136,7 @@ function expectBackToExploration(id: string, outcome: string) {
   expect(u.inputLocked).toBe(false);
   expect(u.mode).toBe('overworld');
   expect(u.transition).toBe(false);
-  expect(u.encounterCooldown).toBe(now + ENCOUNTER_COOLDOWN_MS);
+  expect(u.encounterCooldown).toBe(ENCOUNTER_CONFIG.cooldownSteps);
   expect(u.lastEncounter?.id).toBe(id);
   expect(u.lastEncounter?.outcome).toBe(outcome);
   expect(useBattle.getState().engine).toBeNull();
@@ -158,7 +163,7 @@ describe('rozpoczęcie spotkania', () => {
   });
 
   it('zdarzenie bez przejętej blokady (obce lub powtórzone) jest ignorowane', async () => {
-    const ok = await startWildEncounter({ encounterId: 'enc-obce', actorId: 'wild-9', spawn: SPAWN });
+    const ok = await startWildEncounter({ encounterId: 'enc-obce', source: staticSource('wild-9') });
     expect(ok).toBe(false);
     expect(useUi.getState().gameMode).toBe('EXPLORATION');
     expect(battleEnds).toHaveLength(0);
@@ -167,8 +172,8 @@ describe('rozpoczęcie spotkania', () => {
 
   it('drugie spotkanie w trakcie pierwszego: brak blokady, obce zdarzenie nie przerywa trwającego', async () => {
     const id = await startBattle('wild-1');
-    expect(useUi.getState().tryStartEncounter('wild-2', now)).toBeNull();
-    const ok = await startWildEncounter({ encounterId: 'enc-obce', actorId: 'wild-2', spawn: SPAWN });
+    expect(useUi.getState().tryStartEncounter('wild-2')).toBeNull();
+    const ok = await startWildEncounter({ encounterId: 'enc-obce', source: staticSource('wild-2') });
     expect(ok).toBe(false);
     expect(useUi.getState().activeEncounterId).toBe(id);
     expect(useUi.getState().gameMode).toBe('BATTLE');
@@ -177,8 +182,8 @@ describe('rozpoczęcie spotkania', () => {
 
   it('błąd inicjalizacji: komunikat, spotkanie anulowane raz, powrót do eksploracji', async () => {
     failTypeChart = true;
-    const id = useUi.getState().tryStartEncounter('wild-1', now)!;
-    const ok = await startWildEncounter({ encounterId: id, actorId: 'wild-1', spawn: SPAWN });
+    const id = useUi.getState().tryStartEncounter('wild-1')!;
+    const ok = await startWildEncounter({ encounterId: id, source: staticSource('wild-1') });
     expect(ok).toBe(false);
     expectBackToExploration(id, 'cancel');
     expect(useUi.getState().lastEncounter?.reason).toBe('init-error');
@@ -188,8 +193,8 @@ describe('rozpoczęcie spotkania', () => {
 
   it('wyczerpana drużyna: błąd rozpoczęcia obsłużony centralnie', async () => {
     useGame.setState((s) => ({ party: s.party.map((c) => ({ ...c, hp: 0 })) }));
-    const id = useUi.getState().tryStartEncounter('wild-1', now)!;
-    expect(await startWildEncounter({ encounterId: id, actorId: 'wild-1', spawn: SPAWN })).toBe(false);
+    const id = useUi.getState().tryStartEncounter('wild-1')!;
+    expect(await startWildEncounter({ encounterId: id, source: staticSource('wild-1') })).toBe(false);
     expectBackToExploration(id, 'cancel');
   });
 });
@@ -287,9 +292,9 @@ describe('zakończenie spotkania — każdy wynik przetwarzany dokładnie raz', 
 describe('powrót do eksploracji', () => {
   it('sterowanie wraca po dialogu, joystick jest wyzerowany, odnowienie mija', async () => {
     joystickDown(1, 40, 0); // palec trzymany w chwili kontaktu
-    const id = useUi.getState().tryStartEncounter('wild-1', now)!;
+    const id = useUi.getState().tryStartEncounter('wild-1')!;
     releaseInput('lock'); // jak w scenie po przejęciu blokady
-    await startWildEncounter({ encounterId: id, actorId: 'wild-1', spawn: SPAWN });
+    await startWildEncounter({ encounterId: id, source: staticSource('wild-1') });
     expect(virtualInput.dir).toBeNull();
     setOutcome('win');
     await finishBattle();
@@ -298,9 +303,17 @@ describe('powrót do eksploracji', () => {
     expect(isOverworldBlocked()).toBe(true); // dialog z nagrodą
     closeDialogs();
     expect(isOverworldBlocked()).toBe(false);
-    // Odnowienie: tuż po walce nowe spotkanie jest odrzucane, po jego upływie — możliwe.
-    expect(useUi.getState().tryStartEncounter('wild-2', now + ENCOUNTER_COOLDOWN_MS - 1)).toBeNull();
-    expect(useUi.getState().tryStartEncounter('wild-2', now + ENCOUNTER_COOLDOWN_MS)).not.toBeNull();
+    // Odnowienie w krokach: tuż po walce nowe spotkanie jest odrzucane; każdy krok zmniejsza odnowienie o 1.
+    expect(useUi.getState().tryStartEncounter('wild-2')).toBeNull();
+    const never = createRng(1);
+    for (let i = ENCOUNTER_CONFIG.cooldownSteps; i > 0; i--) {
+      expect(useUi.getState().encounterCooldown).toBe(i);
+      const r = useUi.getState().registerEncounterStep({ movedToNewTile: true, zone: TEST_MAP.zones[0] }, never);
+      expect(r.decision.reason).toBe('cooldown');
+      expect(r.decision.rolled).toBe(false);
+    }
+    expect(useUi.getState().encounterCooldown).toBe(0);
+    expect(useUi.getState().tryStartEncounter('wild-2')).not.toBeNull();
   });
 
   it('kolejne spotkania po sobie działają (blokada nie „wisi”)', async () => {
@@ -310,9 +323,126 @@ describe('powrót do eksploracji', () => {
       expect(await finishBattle()).toBe(true);
       expect(useUi.getState().lastEncounter?.id).toBe(id);
       closeDialogs();
-      now += ENCOUNTER_COOLDOWN_MS;
+      useUi.getState().setEncounterCooldown(0); // jak po przejściu kroków odnowienia
       battleEnds = [];
     }
     expect(useGame.getState().stats.fled).toBe(3);
+  });
+});
+
+describe('losowe spotkanie po kroku (Sprint 2)', () => {
+  const MEADOW = TEST_MAP.zones.find((z) => z.id === 'meadow')!;
+  const stepSource = (): StepEncounterSource => ({
+    kind: 'step',
+    locationId: MEADOW.locationId,
+    zoneId: MEADOW.id,
+    zoneName: MEADOW.name,
+    terrainType: MEADOW.terrainType,
+    encounterTableId: MEADOW.encounterTableId,
+  });
+
+  it('trafienie po kroku przejmuje blokadę, a walka obsługuje wylosowanego przeciwnika', async () => {
+    let built = 0;
+    const restore = configureEncounterDeps({
+      buildStepSpawn: async (source) => {
+        built += 1;
+        expect(source.encounterTableId).toBe('meadow');
+        return { ...SPAWN, zoneId: source.zoneId, zoneName: source.zoneName };
+      },
+    });
+    const { decision, encounterId } = useUi.getState().registerEncounterStep({ movedToNewTile: true, zone: MEADOW }, createSequenceRng([0]));
+    expect(decision.hit).toBe(true);
+    expect(encounterId).not.toBeNull();
+    expect(useUi.getState().gameMode).toBe('ENCOUNTER_STARTING');
+    expect(useUi.getState().sourceEntityId).toBe(`${MEADOW.locationId}:TALL_GRASS`);
+    // Kolejny krok/trigger w tej samej klatce nie losuje i nie startuje drugiego spotkania.
+    const again = useUi.getState().registerEncounterStep({ movedToNewTile: true, zone: MEADOW }, createSequenceRng([0]));
+    expect(again.decision.rolled).toBe(false);
+    expect(again.encounterId).toBeNull();
+
+    expect(await startWildEncounter({ encounterId: encounterId!, source: stepSource() })).toBe(true);
+    expect(built).toBe(1);
+    expect(useUi.getState().gameMode).toBe('BATTLE');
+    expect(useBattle.getState().meta).toMatchObject({ encounterId, actorId: null, staticId: null, zoneId: 'meadow' });
+    setOutcome('win');
+    expect(await finishBattle()).toBe(true);
+    expect(useGame.getState().stats.battlesWon).toBe(1);
+    expect(battleEnds).toEqual([{ encounterId, actorId: null, outcome: 'win' }]);
+    expect(useUi.getState().gameMode).toBe('EXPLORATION');
+    expect(useUi.getState().encounterCooldown).toBe(ENCOUNTER_CONFIG.cooldownSteps);
+    restore();
+  });
+
+  it('chybienie po kroku nie zmienia stanu eksploracji', () => {
+    const { decision, encounterId } = useUi.getState().registerEncounterStep({ movedToNewTile: true, zone: MEADOW }, createSequenceRng([0.99]));
+    expect(decision).toMatchObject({ rolled: true, hit: false, reason: 'miss' });
+    expect(encounterId).toBeNull();
+    expect(useUi.getState().gameMode).toBe('EXPLORATION');
+    expect(useUi.getState().encounterRollCount).toBe(1);
+  });
+
+  it('brak losowania przy otwartym oknie lub dialogu', () => {
+    useUi.setState({ modal: 'bag' });
+    const r = useUi.getState().registerEncounterStep({ movedToNewTile: true, zone: MEADOW }, createSequenceRng([0]));
+    expect(r.decision.rolled).toBe(false);
+    expect(r.encounterId).toBeNull();
+    useUi.setState({ modal: null, dialog: { lines: ['x'], index: 0 } });
+    expect(useUi.getState().registerEncounterStep({ movedToNewTile: true, zone: MEADOW }, createSequenceRng([0])).decision.rolled).toBe(false);
+    expect(useUi.getState().encounterRollCount).toBe(0);
+  });
+
+  it('brak losowania podczas walki (stan BATTLE), odnowienie bez zmian', async () => {
+    await startBattle();
+    useUi.setState({ encounterCooldown: 2 });
+    const r = useUi.getState().registerEncounterStep({ movedToNewTile: true, zone: MEADOW }, createSequenceRng([0]));
+    expect(r.decision).toMatchObject({ rolled: false, reason: 'blocked' });
+    expect(useUi.getState().encounterCooldown).toBe(2);
+    expect(useUi.getState().encounterRollCount).toBe(0);
+  });
+
+  it('błąd przygotowania wylosowanego stworzenia: spotkanie anulowane centralnie', async () => {
+    const restore = configureEncounterDeps({
+      buildStepSpawn: async () => {
+        throw new Error('Offline: brak zapisanych danych stworzeń z tego miejsca.');
+      },
+    });
+    const { encounterId } = useUi.getState().registerEncounterStep({ movedToNewTile: true, zone: MEADOW }, createSequenceRng([0]));
+    expect(await startWildEncounter({ encounterId: encounterId!, source: stepSource() })).toBe(false);
+    const u = useUi.getState();
+    expect(u.gameMode).toBe('EXPLORATION');
+    expect(u.inputLocked).toBe(false);
+    expect(u.lastEncounter).toMatchObject({ id: encounterId, outcome: 'cancel', reason: 'init-error' });
+    expect(u.toast?.text).toContain('Offline');
+    expect(battleEnds).toHaveLength(1);
+    restore();
+  });
+});
+
+describe('spotkanie specjalne (Sprint 2)', () => {
+  it('wygrana ustawia flagę zapisu — stworzenie nie wraca', async () => {
+    const id = useUi.getState().tryStartEncounter('static:gaj-straznik')!;
+    expect(await startWildEncounter({ encounterId: id, source: staticSource('static:gaj-straznik', 'gaj-straznik') })).toBe(true);
+    expect(useBattle.getState().meta.staticId).toBe('gaj-straznik');
+    setOutcome('win');
+    await finishBattle();
+    expect(useGame.getState().flags[staticDoneFlag('gaj-straznik')]).toBe(true);
+    expect(battleEnds[0]).toEqual({ encounterId: id, actorId: 'static:gaj-straznik', outcome: 'win' });
+  });
+
+  it('złapanie także ustawia flagę; ucieczka i przegrana — nie', async () => {
+    for (const [outcome, expected] of [
+      ['fled', false],
+      ['lose', false],
+      ['caught', true],
+    ] as const) {
+      useGame.setState({ flags: {} });
+      useUi.getState().setEncounterCooldown(0);
+      closeDialogs();
+      const id = useUi.getState().tryStartEncounter('static:gaj-straznik')!;
+      await startWildEncounter({ encounterId: id, source: staticSource('static:gaj-straznik', 'gaj-straznik') });
+      setOutcome(outcome, outcome === 'lose' ? (party) => party.forEach((c) => (c.hp = 0)) : undefined);
+      await finishBattle();
+      expect(!!useGame.getState().flags[staticDoneFlag('gaj-straznik')]).toBe(expected);
+    }
   });
 });
