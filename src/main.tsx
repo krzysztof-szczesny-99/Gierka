@@ -1,10 +1,12 @@
 import { createRoot } from 'react-dom/client';
 import { registerSW } from 'virtual:pwa-register';
 import App from './App';
-import { debugSeed, expose } from './debug';
+import { DEBUG, debugSeed, expose } from './debug';
+import { WORLD } from './config/world';
 import { createRng, createSequenceRng, gameRng, rngFromNext } from './engine/rng';
 import { bus } from './game/eventBus';
 import { installInputGuards, joystick, virtualInput } from './game/input';
+import { validateWorld } from './game/world';
 import { configureEncounterDeps } from './services/encounterService';
 import { checkForUpdate, installUpdateChecks, setUpdateRegistration } from './services/updateService';
 import { useBattle } from './state/battleStore';
@@ -19,6 +21,13 @@ if (seed !== null) gameRng.reseed(seed);
 expose('stores', { useGame, useUi, useBattle, bus });
 expose('input', { joystick, virtualInput });
 expose('update', { checkForUpdate });
+expose('world', { WORLD, validateWorld });
+
+// Tryb diagnostyczny: spójność danych świata (błędy trafiają do konsoli — test E2E je wykrywa).
+if (DEBUG) {
+  const issues = validateWorld();
+  if (issues.length) console.error('Błędy w danych świata:', issues);
+}
 // Kontrolowane źródło losowości spotkań dla testów E2E (tylko ?debug).
 expose('encounter', { configure: configureEncounterDeps, createRng, createSequenceRng, rngFromNext, seed });
 

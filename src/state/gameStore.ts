@@ -4,15 +4,23 @@ import { create } from 'zustand';
 import { ITEMS, STARTING_BAG, STARTING_MONEY, type ItemId } from '../config/items';
 import { QUESTS } from '../config/quests';
 import { RULES } from '../config/rules';
-import { TEST_MAP } from '../game/maps/testMap';
+import { getLocation, startPosition, type WorldPosition } from '../game/world';
 import { displayName, healCreature, toMoveSlot } from '../engine/creature';
 import type { Creature, Dir, MoveData, TypeName } from '../engine/types';
 
-export const SAVE_VERSION = 1;
+/**
+ * Wersja formatu zapisu. 2 (Sprint 3): położenie w modelu świata (regionId, locationId, spawnPointId)
+ * zamiast `mapId`; migracja zapisów v1 — src/data/migrations.ts.
+ */
+export const SAVE_VERSION = 2;
 
 export interface PlayerState {
   name: string;
-  mapId: string;
+  /** Region, lokacja i punkt pojawienia się (bezpieczny punkt wejścia) z modelu świata. */
+  regionId: string;
+  locationId: string;
+  spawnPointId: string;
+  /** Ostatnia pozycja na mapie lokacji (przy wczytaniu sprawdzana — patrz resolveSafeEntry). */
   x: number;
   y: number;
   facing: Dir;
@@ -67,14 +75,12 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 function freshData(): GameData {
+  const start = startPosition();
   return {
     version: SAVE_VERSION,
     player: {
       name: 'Tropiciel',
-      mapId: TEST_MAP.id,
-      x: TEST_MAP.spawn.x,
-      y: TEST_MAP.spawn.y,
-      facing: TEST_MAP.spawn.facing,
+      ...start,
       money: STARTING_MONEY,
       steps: 0,
       playTimeMs: 0,
@@ -100,6 +106,8 @@ export interface GameStore extends GameData {
   snapshot(): GameData;
   resetGame(): void;
   setPosition(x: number, y: number, facing: Dir): void;
+  /** Zmiana lokacji (przejście między mapami, powrót do Stacji Opieki, bezpieczne wejście). */
+  setLocation(pos: WorldPosition): void;
   addStep(): void;
   addPlayTime(ms: number): void;
   addMoney(n: number): void;
@@ -155,7 +163,7 @@ export const useGame = create<GameStore>()((set, get) => ({
   newGame: (playerName, starter, starterDex) => {
     const d = freshData();
     d.player.name = playerName.trim() || 'Tropiciel';
-    d.party = [{ ...starter, caughtAt: Date.now(), metAt: TEST_MAP.name }];
+    d.party = [{ ...starter, caughtAt: Date.now(), metAt: getLocation(d.player.locationId)?.name ?? 'Polana Startowa' }];
     d.dex[String(starterDex.id)] = { ...starterDex, seen: true, caught: true };
     set({ ...d, started: true });
   },
@@ -182,6 +190,18 @@ export const useGame = create<GameStore>()((set, get) => ({
   resetGame: () => set({ ...freshData(), started: false }),
 
   setPosition: (x, y, facing) => set((s) => ({ player: { ...s.player, x, y, facing } })),
+  setLocation: (pos) =>
+    set((s) => ({
+      player: {
+        ...s.player,
+        regionId: pos.regionId,
+        locationId: pos.locationId,
+        spawnPointId: pos.spawnPointId,
+        x: pos.x,
+        y: pos.y,
+        facing: pos.facing,
+      },
+    })),
   addStep: () => set((s) => ({ player: { ...s.player, steps: s.player.steps + 1 } })),
   addPlayTime: (ms) => set((s) => ({ player: { ...s.player, playTimeMs: s.player.playTimeMs + ms } })),
 

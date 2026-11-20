@@ -15,7 +15,10 @@ import { isOverworldBlocked, useUi } from '../../state/uiStore';
 import { activeStaticEncounters, encounterZoneAt } from '../encounterZones';
 import { bus, type EncounterOutcome } from '../eventBus';
 import { consumeAction, releaseInput, resetVirtualInput, virtualInput } from '../input';
-import { MAPS, TEST_MAP, type MapDef, type StaticEncounterDef, type ZoneDef } from '../maps/testMap';
+import type { LocationConnection, LocationDef } from '../../config/world';
+import { saveNow } from '../../data/saveGame';
+import { TEST_MAP, type MapDef, type StaticEncounterDef, type ZoneDef } from '../maps/testMap';
+import { checkTravel, connectionAt, getLocation, mapOf, resolveSafeEntry, startLocation, type WorldPosition } from '../world';
 import {
   charAt,
   DIRS,
@@ -60,7 +63,13 @@ const tileCenterX = (x: number) => x * TILE_SIZE + TILE_SIZE / 2;
 const tileBottomY = (y: number) => (y + 1) * TILE_SIZE;
 
 export class OverworldScene extends Phaser.Scene {
+  /** Bieżąca lokacja z modelu świata (src/config/world.ts) i jej mapa. */
+  private location!: LocationDef;
   private mapDef: MapDef = TEST_MAP;
+  /** Trwa przejście do innej lokacji (wygaszanie ekranu przed przeładowaniem sceny). */
+  private traveling = false;
+  /** Scena została uruchomiona ponownie po przejściu między mapami. */
+  private arrivedByTravel = false;
   private grid: string[][] = [];
   private layer: Phaser.Tilemaps.TilemapLayer | null = null;
   private player!: Phaser.GameObjects.Container;
@@ -90,12 +99,37 @@ export class OverworldScene extends Phaser.Scene {
 
   // ───────────────────────────── tworzenie ─────────────────────────────
 
+  /** Phaser wywołuje init przed create — także przy przeładowaniu sceny po zmianie mapy: zerujemy stan. */
+  init(data?: { travel?: boolean }): void {
+    this.arrivedByTravel = !!data?.travel;
+    this.traveling = false;
+    this.moving = false;
+    this.stepToggle = false;
+    this.lastBump = null;
+    this.follower = null;
+    this.followerImage = null;
+    this.followerTile = null;
+    this.followerKey = '';
+    this.followerReq += 1;
+    this.actors = [];
+    this.layer = null;
+    this.waterAlt = false;
+    this.cleanups = [];
+  }
+
   create(): void {
     this.disposed = false;
     // Nowa scena mapy zawsze startuje w eksploracji (bez pozostałości po poprzedniej grze).
     if (useUi.getState().mode === 'overworld') useUi.getState().resetEncounterState();
+    // Lokacja z zapisu + bezpieczny punkt wejścia (nieistniejąca lokacja lub zła pozycja → punkt pojawienia się).
+    const entry = resolveSafeEntry(useGame.getState().player);
+    const p0 = useGame.getState().player;
+    if (p0.locationId !== entry.locationId || p0.x !== entry.x || p0.y !== entry.y || p0.spawnPointId !== entry.spawnPointId) {
+      useGame.getState().setLocation(entry);
+    }
     const g = useGame.getState();
-    this.mapDef = MAPS[g.player.mapId] ?? TEST_MAP;
+    this.location = getLocation(entry.locationId) ?? startLocation();
+    this.mapDef = mapOf(this.location) ?? TEST_MAP;
     this.grid = this.mapDef.layout.map((row) => row.split(''));
 
     const data = this.grid.map((row) => row.map((ch) => tileDef(ch).index));
@@ -108,10 +142,6 @@ export class OverworldScene extends Phaser.Scene {
     this.tx = g.player.x;
     this.ty = g.player.y;
     this.facing = g.player.facing;
-    if (!this.isWalkable(this.tx, this.ty)) {
-      this.tx = this.mapDef.spawn.x;
-      this.ty = this.mapDef.spawn.y;
-    }
     const shadow = this.add.ellipse(0, -1, 11, 4, 0x000000, 0.28);
     this.hero = this.add.sprite(0, 0, 'hero-down-0').setOrigin(0.5, 1);
     this.player = this.add.container(tileCenterX(this.tx), tileBottomY(this.ty), [shadow, this.hero]);
@@ -157,9 +187,16 @@ export class OverworldScene extends Phaser.Scene {
       unsubUi,
       bus.on('battle-end', (p) => this.onBattleEnd(p.actorId, p.outcome)),
       bus.on('teleport', (p) => this.teleport(p.x, p.y, p.facing)),
+      bus.on('travel', (p) => this.travelTo(p)),
     );
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.dispose());
     this.events.once(Phaser.Scenes.Events.DESTROY, () => this.dispose());
+
+    // Koniec przejścia między mapami: rozjaśnienie i odblokowanie wejścia.
+    if (this.arrivedByTravel) {
+      cam.fadeIn(220, 0, 0, 0);
+      useUi.getState().setTransition(false);
+    }
   }
 
   private dispose(): void {
@@ -168,7 +205,9 @@ export class OverworldScene extends Phaser.Scene {
     this.cleanups.forEach((fn) => fn());
     this.cleanups = [];
     this.scale.off(Phaser.Scale.Events.RESIZE, this.onResize, this);
-    resetVirtualInput();
+    // Przy zmianie mapy zachowujemy przełącznik biegu; przy zamknięciu gry — pełne zerowanie.
+    if (this.traveling) releaseInput('reset');
+    else resetVirtualInput();
   }
 
   // ───────────────────────────── pętla ─────────────────────────────
@@ -263,6 +302,12 @@ export class OverworldScene extends Phaser.Scene {
     const g = useGame.getState();
     g.setPosition(this.tx, this.ty, this.facing);
     g.addStep();
+    // Wyjście z lokacji: przejście albo komunikat o blokadzie (wtedy bez losowania spotkania).
+    const conn = connectionAt(this.location, this.tx, this.ty);
+    if (conn) {
+      this.useConnection(conn);
+      return;
+    }
     // Losowe spotkanie: sprawdzane wyłącznie po wejściu na nowe pole (najwyżej jeden rzut na krok).
     const zone = encounterZoneAt(this.mapDef, this.grid, this.tx, this.ty, useGame.getState().flags);
     const { encounterId } = useUi.getState().registerEncounterStep({ movedToNewTile: true, zone }, encounterStepRng());
@@ -291,6 +336,50 @@ export class OverworldScene extends Phaser.Scene {
     this.placeFollowerBehind();
     // Przeniesienie (np. do Stacji Opieki) = wejście w nowe miejsce: kroki ochronne.
     useUi.getState().protectSteps(ENCOUNTER_CONFIG.mapEnterSafeSteps);
+  }
+
+  // ───────────────────────────── przejścia między mapami ─────────────────────────────
+
+  private useConnection(conn: LocationConnection): void {
+    const g = useGame.getState();
+    const check = checkTravel(conn, { flags: g.flags, bag: g.bag });
+    if (!check.ok) {
+      this.setHeroFrame(false);
+      bus.emit('dialog', { lines: check.message });
+      return;
+    }
+    this.travelTo(check.position);
+  }
+
+  /**
+   * Przejście do innej lokacji (albo w obrębie tej samej — wtedy zwykłe przeniesienie): zapis położenia,
+   * wygaszenie ekranu i przeładowanie sceny z mapą nowej lokacji. Wejście jest zablokowane do końca przejścia.
+   */
+  private travelTo(pos: WorldPosition): void {
+    if (this.disposed || this.traveling) return;
+    if (pos.locationId === this.location.id) {
+      useGame.getState().setLocation(pos);
+      this.teleport(pos.x, pos.y, pos.facing);
+      return;
+    }
+    this.traveling = true;
+    const ui = useUi.getState();
+    ui.setTransition(true);
+    releaseInput('lock');
+    this.input.keyboard?.resetKeys();
+    this.setHeroFrame(false);
+    useGame.getState().setLocation(pos);
+    saveNow().catch(() => undefined);
+    const cam = this.cameras.main;
+    cam.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
+      if (!this.disposed) this.scene.restart({ travel: true });
+    });
+    cam.fadeOut(220, 0, 0, 0);
+  }
+
+  /** Czy pole jest wyzwalaczem przejścia (diagnostyka i testy). */
+  exitAt(x: number, y: number): string | null {
+    return connectionAt(this.location, x, y)?.id ?? null;
   }
 
   // ───────────────────────────── interakcje ─────────────────────────────
@@ -528,7 +617,8 @@ export class OverworldScene extends Phaser.Scene {
     return charAt(this.grid, x, y);
   }
 
-  private isWalkable(x: number, y: number): boolean {
+  /** Czy pole jest dostępne (używane też w testach E2E). */
+  isWalkable(x: number, y: number): boolean {
     return isWalkable(this.grid, x, y);
   }
 

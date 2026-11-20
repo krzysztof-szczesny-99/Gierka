@@ -3,6 +3,7 @@
 import type { TerrainType } from '../config/encounters';
 import type { Dir } from '../engine/types';
 import type { WildSpawn } from '../services/creatureService';
+import type { WorldPosition } from './world';
 
 export type EncounterOutcome = 'win' | 'lose' | 'fled' | 'caught' | 'cancel';
 
@@ -22,6 +23,8 @@ export interface BusEvents {
   dialog: { lines: string[] };
   door: { kind: 'care' | 'shop' };
   teleport: { x: number; y: number; facing: Dir };
+  /** Przeniesienie do pozycji w świecie (ta sama lokacja — teleport; inna — przeładowanie sceny z nową mapą). */
+  travel: WorldPosition;
   'follower-refresh': undefined;
 }
 

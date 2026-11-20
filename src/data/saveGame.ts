@@ -3,16 +3,14 @@
 import { SAVE_VERSION, useGame, type GameData } from '../state/gameStore';
 import { useUi } from '../state/uiStore';
 import { db } from './db';
+import { migrateSave } from './migrations';
 
 const SLOT = 'slot1';
 const AUTOSAVE_DELAY = 2000;
 
-/** Migracje zapisów między wersjami formatu (na razie tylko wersja 1). */
-function migrate(data: GameData): GameData {
-  if (!data || typeof data !== 'object') throw new Error('Uszkodzony zapis.');
-  if (!data.version) data.version = 1;
-  if (data.version > SAVE_VERSION) throw new Error('Zapis pochodzi z nowszej wersji gry.');
-  return data;
+/** Migracje zapisów między wersjami formatu — patrz src/data/migrations.ts. */
+function migrate(data: unknown): GameData {
+  return migrateSave(data);
 }
 
 export async function hasSave(): Promise<boolean> {
@@ -22,7 +20,7 @@ export async function hasSave(): Promise<boolean> {
 export async function loadGame(): Promise<GameData | null> {
   const row = await db.saves.get(SLOT);
   if (!row) return null;
-  return migrate(row.data as GameData);
+  return migrate(row.data);
 }
 
 let lastSaveAt = 0;
@@ -110,7 +108,7 @@ export function exportSave(): void {
 
 export async function importSave(file: File): Promise<void> {
   const text = await file.text();
-  const data = migrate(JSON.parse(text) as GameData);
+  const data = migrate(JSON.parse(text) as unknown);
   if (!Array.isArray(data.party) || !data.player) throw new Error('To nie wygląda na zapis tej gry.');
   useGame.getState().loadData(data);
   await saveNow();

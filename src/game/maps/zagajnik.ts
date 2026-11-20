@@ -1,0 +1,51 @@
+// Oryginalna mapa „Szepczący Zagajnik” (26×18 kafelków) — druga lokacja Krainy Szlaków.
+// Legenda jak w testMap.ts. Wejście/wyjście: zachodnia ścieżka (do Polany Startowej).
+// Północna ścieżka prowadzi na Wzgórza Wiatru (lokacja PLANNED — przejście zablokowane z komunikatem).
+// Bezpieczna polanka przy wejściu; spotkania w paprociach (wysoka trawa) — tabela „zagajnik”.
+
+import { ENCOUNTER_CONFIG } from '../../config/encounters';
+import { ZAGAJNIK_ID } from '../../config/world';
+import type { MapDef } from './testMap';
+
+export const ZAGAJNIK_MAP: MapDef = {
+  id: 'zagajnik',
+  name: 'Szepczący Zagajnik',
+  layout: [
+    'TTTTTTTTTTTTT=TTTTTTTTTTTT',
+    'TTTTTTTT,,,T.=.T,,,TTTTTTT',
+    'TTT,,,,,,,,,.=.,,,,,,,,TTT',
+    'TT,,,,TT,,,,.=.,,,,,,,,,TT',
+    'TT,,,,TT,,,f.=.f,,,,TT,,TT',
+    'TT,,,,,,,,,..=..,,,,TT,,TT',
+    'TT...,,,,,...=...,,,,,,,TT',
+    'TT.f........S=.....ff...TT',
+    'TT....=========.......R.TT',
+    '=======.ff....=....~~~..TT',
+    'TT.S..........=...~~~~~.TT',
+    'TT.f...,,,,,..=....~~~..TT',
+    'TT....,,,,,,,.=.........TT',
+    'TT...,,,,TT,,,=..,,,,,..TT',
+    'TT..,,,,,TT,,,=.,,,,,,,.TT',
+    'TT...,,,,,,,,.=.,,,,,,,.TT',
+    'TT........R...=.........TT',
+    'TTTTTTTTTTTTTTTTTTTTTTTTTT',
+  ],
+  zones: [
+    {
+      id: 'paprocie',
+      name: 'Paprociowy Gąszcz',
+      rect: { x: 0, y: 0, w: 26, h: 18 },
+      locationId: ZAGAJNIK_ID,
+      terrainType: 'TALL_GRASS',
+      encounterTableId: 'zagajnik',
+      baseEncounterRate: ENCOUNTER_CONFIG.baseRates.TALL_GRASS,
+      stepDistance: ENCOUNTER_CONFIG.defaultStepDistance,
+    },
+  ],
+  staticEncounters: [],
+  signs: {
+    '3,10': ['Szepczący Zagajnik.', 'W paprociach szeleszczą leśne stworzenia. Ścieżką na zachód wrócisz na Polanę Startową.'],
+    '12,7': ['Na północ: Wzgórza Wiatru.', 'Uwaga: za zakrętem drogę zagradza zwalone drzewo.'],
+  },
+  doors: {},
+};

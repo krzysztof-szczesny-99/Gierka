@@ -93,11 +93,29 @@ Creature     { uid, pokemon (wariant/forma), speciesId, name, nickname?, types[]
                heldItem, friendship, metLevel, metAt, caughtAt, mighty }
 BattleState  { turn, sides[2]{kind, party[], active[]}, boosts{uid}, volatiles{uid}, pokemon{}, moves{}, growth{},
                typeChart, captureRate, participants[], awaitingSwitch, outcome, caught, pendingLearns[] }
-SaveData     { version, savedAt, player{name, mapId, x, y, facing, money, steps, playTimeMs},
+SaveData v2  { version: 2, savedAt, player{name, regionId, locationId, spawnPointId, x, y, facing, money, steps, playTimeMs},
                party[], storage[], bag{}, dex{speciesId: {seen, caught, name, sprite, types}},
                stats{}, questsClaimed{}, flags{}, settings{} }
 Dexie        cache(key, kind, data, fetchedAt) · saves(id, data, updatedAt)
+Migracja     v1 → v2 (src/data/migrations.ts): player.mapId → regionId + locationId + spawnPointId 'start', pozycja bez zmian;
+             nieznana mapa/lokacja → lokacja startowa; wersja nowsza niż obsługiwana → błąd (zapis nie jest nadpisywany).
+
+// Model świata (Sprint 3) — dane w src/config/world.ts, logika i walidacja w src/game/world.ts
+RegionDef    { id, name, generationReference, startLocationId, locationIds[], unlockRequirements, status }
+LocationDef  { id, name, regionId, type, status, mapReference, connections[], spawnPoints[], encounterTableIds[],
+               availableEncounterMethods[], requiredBadges[], requiredItems[], requiredEvents[], hidden, healingPoint }
+               status: IMPLEMENTED | DATA_ONLY | PLANNED | BLOCKED_BY_MISSING_ASSET
+               type:   TOWN | CITY | ROUTE | FOREST | CAVE | WATER | BUILDING | CHALLENGE | SPECIAL
+Connection   { id, sourceLocationId, destinationLocationId, sourceTrigger{kind:'tile', x, y}, destinationSpawnPoint,
+               requirements{badges?, items?, events?}, blockedMessage[] }
+SpawnPoint   { id, x, y, facing }        HealingPoint { locationId, spawnPointId }
 ```
+
+Lokacje (Sprint 3): **Polana Startowa** (`polana-startowa`, TOWN, mapa `polana`, tabele meadow/pond/rocks/grove + Strażnik)
+⇄ **Szepczący Zagajnik** (`szepczacy-zagajnik`, FOREST, mapa `zagajnik`, tabela `zagajnik`) → **Wzgórza Wiatru**
+(`wzgorza-wiatru`, ROUTE, PLANNED — przejście zablokowane komunikatem). Walidacja danych (`validateWorld`): duplikaty ID,
+brakujące lokacje/regiony/mapy/punkty pojawienia się/tabele, błędne połączenia (wyzwalacz na przeszkodzie, brak drogi
+powrotnej), punkty na przeszkodzie lub na wyjściu, osiągalność lokacji. Uruchamiana w testach jednostkowych i w trybie `?debug` (błędy trafiają do konsoli).
 
 ## 5. Struktura folderów
 
@@ -109,13 +127,13 @@ szlaki-dziczy/
 └─ src/
    ├─ main.tsx · App.tsx · vite-env.d.ts
    ├─ api/        pokeapi.ts (kolejka, retry, offline) · raw.ts (typy API) · normalize.ts
-   ├─ data/       db.ts (Dexie) · repository.ts (bufor pamięć→IndexedDB→API) · saveGame.ts (zapis/autozapis)
-   ├─ config/     rules.ts · items.ts · encounters.ts · quests.ts · moveOverrides.ts · text.ts
+   ├─ data/       db.ts (Dexie) · repository.ts (bufor pamięć→IndexedDB→API) · saveGame.ts (zapis/autozapis) · migrations.ts (wersje zapisu)
+   ├─ config/     rules.ts · items.ts · encounters.ts · world.ts (regiony, lokacje, połączenia) · quests.ts · moveOverrides.ts · text.ts
    ├─ engine/     types.ts · rng.ts · stats.ts · typeChart.ts · experience.ts · moves.ts · creature.ts
    │  ├─ battle/  types.ts · damage.ts · status.ts · catch.ts · ai.ts · battleEngine.ts
    │  └─ __tests__/ engine.test.ts · fixtures.ts
-   ├─ game/       PhaserGame.tsx · eventBus.ts · input.ts (joystick) · movement.ts (reguły ruchu) · encounterZones.ts (tereny i losowanie) · tiles.ts · art.ts · textures.ts
-   │  ├─ maps/    testMap.ts
+   ├─ game/       PhaserGame.tsx · eventBus.ts · input.ts (joystick) · movement.ts (reguły ruchu) · encounterZones.ts (tereny i losowanie) · world.ts (przejścia, wymagania, bezpieczne wejście, walidacja świata) · tiles.ts · art.ts · textures.ts
+   │  ├─ maps/    index.ts (rejestr map) · testMap.ts (Polana Startowa) · zagajnik.ts (Szepczący Zagajnik)
    │  └─ scenes/  BootScene.ts · OverworldScene.ts
    ├─ services/   creatureService.ts · encounterService.ts · bootService.ts
    ├─ state/      gameStore.ts · uiStore.ts · battleStore.ts

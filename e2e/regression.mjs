@@ -1,4 +1,5 @@
-// Testy regresji E2E (Sprint 1: joystick i blokada spotkań; Sprint 2: tereny i losowe spotkania)
+// Testy regresji E2E (Sprint 1: joystick i blokada spotkań; Sprint 2: tereny i losowe spotkania;
+// Sprint 3: model świata, dwie lokacje, przejścia, zapis lokacji i migracja zapisu)
 // na prawdziwym buildzie (Phaser + PokéAPI). Ruch wyłącznie przez joystick ekranowy (zdarzenia wskaźnika)
 // i klawiaturę — bez tap-to-move. Losowość: ziarno gry z adresu (?debug&seed=…) oraz kontrolowane źródło
 // rzutu na spotkanie (stepRng) ustawiane przez tryb diagnostyczny. Tryb ?debug służy tylko do odczytu stanu
@@ -92,7 +93,7 @@ async function placeWithRoom(dir, need, { terrain = 'any', extra = null } = {}) 
     const sc = window.__szlaki.game.scene.getScene('Overworld');
     const D = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
     const ok = (x, y) => {
-      if (!sc.isWalkable(x, y) || sc.actorAt(x, y)) return false;
+      if (!sc.isWalkable(x, y) || sc.actorAt(x, y) || sc.exitAt(x, y)) return false; // wyjścia z mapy omijamy
       const ch = sc.grid[y][x];
       if (terrain === 'grass') return ch === ',';
       if (terrain === 'safe') return ch !== ',' && ch !== 'r';
@@ -100,7 +101,7 @@ async function placeWithRoom(dir, need, { terrain = 'any', extra = null } = {}) 
     };
     const run = (x, y, d) => { let n = 0; const [dx, dy] = D[d]; for (let i = 1; i <= 12; i++) { if (ok(x + dx * i, y + dy * i)) n++; else break; } return n; };
     for (let y = 1; y < sc.grid.length - 1; y++) for (let x = 1; x < sc.grid[0].length - 1; x++) {
-      if (!sc.isWalkable(x, y) || sc.actorAt(x, y)) continue;
+      if (!sc.isWalkable(x, y) || sc.actorAt(x, y) || sc.exitAt(x, y)) continue;
       if (terrain === 'safe' && !ok(x, y)) continue;
       if (run(x, y, dir) < need) continue;
       if (extra && run(x, y, extra) < need) continue;
@@ -710,6 +711,235 @@ try {
   const ok = u0.cooldown === 2 && map.aktorzy.length === 0 && map.towarzysz && JSON.stringify(seen) === '[1,0]' && ev2 === 0 && ev3 === 1;
   record('T13', 'Po wejściu na mapę 2 kroki ochronne (bez losowań), trzeci losuje; Strażnik nie wraca po złapaniu; towarzysz jest', ok, { odnowieniePoWczytaniu: u0.cooldown, mapa: map, spot, odnowieniePoKrokach: seen, spotkaniaW2Krokach: ev2, spotkaniaPo3: ev3 });
 } catch (e) { fail('T13', 'Wejście na mapę', e); }
+
+// ═════════════ Sprint 3: model świata, dwie lokacje, przejścia, zapis lokacji ═════════════
+const REGION = 'kraina-szlakow';
+const POLANA = 'polana-startowa';
+const ZAGAJNIK = 'szepczacy-zagajnik';
+const POLANA_TABLES = ['meadow', 'pond', 'rocks', 'grove'];
+const ZAGAJNIK_SPECIES = { caterpie: [3, 5], weedle: [3, 5], oddish: [4, 6], hoothoot: [4, 6], seedot: [4, 6], skwovet: [3, 5], fomantis: [5, 7] };
+/** Położenie w świecie: scena (mapa, pozycja), zapis w stanie gry, HUD, odnowienie spotkań. */
+const where = () => S(() => {
+  const sc = window.__szlaki.game.scene.getScene('Overworld');
+  const g = window.__szlaki.stores.useGame.getState().player;
+  const u = window.__szlaki.stores.useUi.getState();
+  const chip = [...document.querySelectorAll('.chip')].find((c) => c.textContent.includes('📍'));
+  return { scena: sc.location?.id ?? null, mapa: sc.mapDef.id, region: g.regionId, lokacja: g.locationId, punkt: g.spawnPointId, zapisPoz: [g.x, g.y], poz: [sc.tx, sc.ty], kierunek: sc.facing, towarzysz: !!sc.follower, przejscie: u.transition, odnowienie: u.encounterCooldown, hud: chip ? chip.textContent : null };
+});
+/** Czeka na koniec przejścia: scena z mapą lokacji `id`, wejście odblokowane, towarzysz na miejscu. */
+const waitArrival = (id) => page.waitForFunction((id) => {
+  const sc = window.__szlaki?.game?.scene?.getScene('Overworld');
+  return !!sc && sc.location?.id === id && !window.__szlaki.stores.useUi.getState().transition && !!sc.follower;
+}, id, { timeout: 20000 });
+/** Wiersz zapisu prosto z IndexedDB (to, co przetrwa zamknięcie aplikacji). */
+const idbSave = () => S(() => new Promise((resolve, reject) => {
+  const req = indexedDB.open('szlaki-dziczy');
+  req.onerror = () => reject(req.error);
+  req.onsuccess = () => {
+    const db = req.result;
+    const q = db.transaction('saves', 'readonly').objectStore('saves').get('slot1');
+    q.onerror = () => reject(q.error);
+    q.onsuccess = () => {
+      db.close();
+      const row = q.result;
+      resolve(row ? { wersjaWiersza: row.version, wersjaDanych: row.data.version, region: row.data.player.regionId ?? null, lokacja: row.data.player.locationId ?? null, punkt: row.data.player.spawnPointId ?? null, mapId: row.data.player.mapId ?? null, poz: [row.data.player.x, row.data.player.y], pieniadze: row.data.player.money } : null);
+    };
+  };
+}));
+const idbPut = (row) => S((row) => new Promise((resolve, reject) => {
+  const req = indexedDB.open('szlaki-dziczy');
+  req.onerror = () => reject(req.error);
+  req.onsuccess = () => {
+    const db = req.result;
+    const tx = db.transaction('saves', 'readwrite');
+    tx.objectStore('saves').put(row);
+    tx.oncomplete = () => { db.close(); resolve(true); };
+    tx.onerror = () => reject(tx.error);
+  };
+}), row);
+/** Ucieczka z dzikiej walki (szybki starter — jak w T9) i powrót na mapę. */
+async function fleeFast() {
+  await page.waitForFunction(() => window.__szlaki.stores.useBattle.getState().phase === 'choose', null, { timeout: 20000 });
+  await S(() => {
+    const B = window.__szlaki.stores.useBattle;
+    const engine = structuredClone(B.getState().engine);
+    const side = engine.sides[0];
+    side.party[side.active[0]].stats.spe = 999;
+    B.setState({ engine });
+  });
+  const outcome = await fleeToEnd();
+  await page.getByRole('button', { name: 'Dalej' }).click();
+  await afterBattleBackOnMap();
+  return outcome;
+}
+
+// ───────────── W1. Model świata ─────────────
+try {
+  await setStepRng('miss');
+  const w = await S(() => { const W = window.__szlaki.world; return { bledy: W.validateWorld(), region: W.WORLD.regions.map((r) => `${r.id}:${r.status}`), lokacje: W.WORLD.locations.map((l) => `${l.id}:${l.type}:${l.status}`) }; });
+  const p = await where();
+  record('W1', 'Model świata: dane bez błędów walidacji; gra stoi na Polanie Startowej (stały identyfikator) w regionie', w.bledy.length === 0 && p.region === REGION && p.lokacja === POLANA && p.scena === POLANA && p.mapa === 'polana', { ...w, gracz: p });
+} catch (e) { fail('W1', 'Model świata', e); }
+
+// ───────────── W2. Przejście A → B joystickiem ─────────────
+let w2ok = false;
+try {
+  await setStepRng('miss');
+  await S(() => window.__szlaki.stores.bus.emit('teleport', { x: 36, y: 14, facing: 'right' }));
+  await idle(300);
+  const exit = await S(() => window.__szlaki.game.scene.getScene('Overworld').exitAt(39, 14));
+  const start = await pos();
+  await hold(...OFF.right, 1400, false); // 36 → 37 → 38 → 39 (wyjście)
+  await waitArrival(ZAGAJNIK);
+  const arrived = await where();
+  await idle(900); // palec wciąż na joysticku: po przejściu nie prowadzi postaci dalej
+  const still = await pos();
+  await page.mouse.up();
+  const save = await idbSave();
+  await shot('w2-zagajnik');
+  w2ok = exit === 'polana-do-zagajnika' && arrived.scena === ZAGAJNIK && arrived.mapa === 'zagajnik' && arrived.lokacja === ZAGAJNIK && arrived.region === REGION && arrived.punkt === 'z-polany' && same(arrived.poz, [2, 9]) && same(arrived.zapisPoz, [2, 9]) && arrived.kierunek === 'right' && arrived.towarzysz && !arrived.przejscie && arrived.odnowienie >= 2 && /Szepczący Zagajnik/.test(arrived.hud ?? '') && same(still, [2, 9]) && save?.lokacja === ZAGAJNIK && save?.wersjaDanych === 2;
+  record('W2', 'Przejście A→B joystickiem: Zagajnik, punkt „z-polany” (2,9) twarzą w prawo, towarzysz, HUD, kroki ochronne, zapis od razu w IndexedDB', w2ok, { wyjscie: exit, start, poPrzejsciu: arrived, palecTrzymany900ms: still, zapis: save });
+} catch (e) { fail('W2', 'Przejście A→B', e); }
+
+// ───────────── W3. Spotkanie na mapie B korzysta z tabeli Zagajnika ─────────────
+try {
+  if (!w2ok) throw new Error('brak przejścia do Zagajnika z W2');
+  const before = await stats();
+  const enc = await grassEncounter();
+  const foe = await enemy();
+  const range = ZAGAJNIK_SPECIES[foe.pokemon];
+  const lvlOk = !!range && foe.level >= range[0] + (foe.mighty ? 3 : 0) && foe.level <= range[1] + (foe.mighty ? 3 : 0);
+  await shot('w3-zagajnik-battle');
+  const outcome = await fleeFast();
+  const p = await where();
+  const ok = enc.zdarzenia.length === 1 && enc.zdarzenia[0].kind === 'step' && enc.zdarzenia[0].zoneId === 'paprocie' && enc.zdarzenia[0].table === 'zagajnik' && lvlOk && (await stats()).encounters === before.encounters + 1 && outcome === 'fled' && p.lokacja === ZAGAJNIK && p.scena === ZAGAJNIK;
+  record('W3', 'Spotkanie w paprociach Zagajnika: tabela „zagajnik” (inna niż na Polanie), gatunek i poziom z tej tabeli; po walce gracz zostaje na mapie B', ok, { ...enc, przeciwnik: foe, zakres: range, wynik: outcome, poWalce: p });
+} catch (e) { fail('W3', 'Tabela spotkań mapy B', e); }
+
+// ───────────── W4. Zapis na mapie B i ponowne wczytanie ─────────────
+try {
+  if (!w2ok) throw new Error('brak przejścia do Zagajnika z W2');
+  await setStepRng('miss');
+  const spot = await placeWithRoom('right', 2, { terrain: 'safe' });
+  await idle(300);
+  await hold(...OFF.right, 500); // ruch → autozapis
+  await idle(2800);
+  const before = await where();
+  const save = await idbSave();
+  await page.reload();
+  await page.getByRole('button', { name: /Kontynuuj/ }).click({ timeout: 15000 });
+  await waitJoystick();
+  await waitArrival(ZAGAJNIK);
+  await setStepRng('miss');
+  const after = await where();
+  const restored = await controlRestored();
+  const ok = save?.lokacja === ZAGAJNIK && same(save.poz, before.zapisPoz) && after.scena === ZAGAJNIK && after.mapa === 'zagajnik' && after.lokacja === ZAGAJNIK && same(after.poz, before.poz) && after.towarzysz && /Szepczący Zagajnik/.test(after.hud ?? '') && restored.ruszyl;
+  record('W4', 'Zapis na mapie B i ponowne wczytanie (przeładowanie + Kontynuuj): gra wraca do Zagajnika w to samo miejsce', ok, { spot, przed: before, zapis: save, poWczytaniu: after, sterowanie: restored });
+} catch (e) { fail('W4', 'Zapis i wczytanie mapy B', e); }
+
+// ───────────── W5. Zablokowana ścieżka (lokacja w planach): komunikat i brak softlocka ─────────────
+try {
+  if (!w2ok) throw new Error('brak przejścia do Zagajnika z W2');
+  await setStepRng('miss');
+  await S(() => window.__szlaki.stores.bus.emit('teleport', { x: 13, y: 2, facing: 'up' }));
+  await idle(300);
+  await hold(...OFF.up, 1100, false); // 2 → 1 → 0 (wyzwalacz ścieżki na Wzgórza)
+  await page.locator('.dialog').waitFor({ timeout: 5000 });
+  const text = (await page.locator('.dialog').textContent()) ?? '';
+  const atExit = await where();
+  await page.mouse.up();
+  await closeDialogs();
+  await idle(200);
+  await hold(...OFF.down, 750);
+  await idle(400);
+  const after = await where();
+  const ok = /zwalone drzewo/.test(text) && same(atExit.poz, [13, 0]) && atExit.scena === ZAGAJNIK && after.scena === ZAGAJNIK && after.lokacja === ZAGAJNIK && after.poz[0] === 13 && after.poz[1] >= 1 && !after.przejscie && !(await page.locator('.dialog').count());
+  record('W5', 'Ścieżka na Wzgórza (PLANNED) zablokowana: komunikat, gracz zostaje w Zagajniku i odchodzi joystickiem (brak softlocka)', ok, { komunikat: text, naWyjsciu: atExit, poOdejsciu: after });
+} catch (e) { fail('W5', 'Zablokowana ścieżka', e); }
+
+// ───────────── W6. Powrót B → A joystickiem ─────────────
+let w6ok = false;
+try {
+  if (!w2ok) throw new Error('brak przejścia do Zagajnika z W2');
+  await setStepRng('miss');
+  await S(() => window.__szlaki.stores.bus.emit('teleport', { x: 3, y: 9, facing: 'left' }));
+  await idle(300);
+  const exit = await S(() => window.__szlaki.game.scene.getScene('Overworld').exitAt(0, 9));
+  await hold(...OFF.left, 1400, false); // 3 → 2 → 1 → 0 (wyjście)
+  await waitArrival(POLANA);
+  const arrived = await where();
+  await idle(900);
+  const still = await pos();
+  await page.mouse.up();
+  const actors = await S(() => ({ ids: window.__szlaki.game.scene.getScene('Overworld').actors.map((a) => a.id), straznikZlapany: !!window.__szlaki.stores.useGame.getState().flags['static-done:gaj-straznik'] }));
+  const save = await idbSave();
+  await shot('w6-polana');
+  w6ok = exit === 'zagajnik-do-polany' && arrived.scena === POLANA && arrived.mapa === 'polana' && arrived.lokacja === POLANA && arrived.punkt === 'z-zagajnika' && same(arrived.poz, [38, 14]) && arrived.kierunek === 'left' && arrived.towarzysz && !arrived.przejscie && arrived.odnowienie >= 2 && !/Zagajnik/.test(arrived.hud ?? '') && same(still, [38, 14]) && actors.ids.length === (actors.straznikZlapany ? 0 : 1) && save?.lokacja === POLANA;
+  record('W6', 'Powrót B→A joystickiem: Polana przy wschodnim wyjściu (38,14) twarzą od wyjścia; stan Strażnika zachowany; zapis od razu', w6ok, { wyjscie: exit, poPrzejsciu: arrived, palecTrzymany900ms: still, aktorzy: actors, zapis: save });
+} catch (e) { fail('W6', 'Powrót B→A', e); }
+
+// ───────────── W7. Po powrocie na Polanę spotkania znów z tabel Polany ─────────────
+try {
+  if (!w6ok) throw new Error('brak powrotu na Polanę z W6');
+  const enc = await grassEncounter();
+  const foe = await enemy();
+  const outcome = await fleeFast();
+  const p = await where();
+  const ok = enc.zdarzenia.length === 1 && POLANA_TABLES.includes(enc.zdarzenia[0].table) && enc.zdarzenia[0].table !== 'zagajnik' && !(foe.pokemon in ZAGAJNIK_SPECIES) && outcome === 'fled' && p.lokacja === POLANA;
+  record('W7', 'Po powrocie na Polanę spotkanie korzysta z tabeli Polany (nie Zagajnika)', ok, { ...enc, przeciwnik: foe, wynik: outcome });
+} catch (e) { fail('W7', 'Tabela po powrocie', e); }
+
+// ───────────── W8. Przegrana w Zagajniku → Stacja Opieki na Polanie (punkt leczenia z modelu świata) ─────────────
+try {
+  await setStepRng('miss');
+  await S((r) => window.__szlaki.stores.bus.emit('travel', { regionId: r, locationId: 'szepczacy-zagajnik', spawnPointId: 'z-polany', x: 2, y: 9, facing: 'right' }), REGION);
+  await waitArrival(ZAGAJNIK);
+  const before = await stats();
+  await S(() => window.__szlaki.stores.useGame.setState((s) => ({ party: s.party.map((c) => ({ ...c, hp: 1 })) })));
+  await grassEncounter();
+  await fightToEnd(true);
+  const outcome = await S(() => window.__szlaki.stores.useBattle.getState().engine.outcome);
+  await page.getByRole('button', { name: 'Dalej' }).click();
+  await afterBattleBackOnMap();
+  if (outcome === 'lose') await waitArrival(POLANA);
+  const p = await where();
+  const after = await stats();
+  const hp = await S(() => window.__szlaki.stores.useGame.getState().party.every((c) => c.hp === c.stats.hp));
+  const restored = await controlRestored();
+  const ok = after.blackouts - before.blackouts === 1 && p.scena === POLANA && p.lokacja === POLANA && p.punkt === 'stacja-opieki' && same(p.poz, [5, 6]) && hp && p.odnowienie >= 2 && !p.przejscie && restored.ruszyl;
+  record('W8', 'Przegrana w Zagajniku: powrót raz do Stacji Opieki na Polanie (5,6), drużyna wyleczona, sterowanie wraca', outcome === 'lose' ? ok : 'INFO', { wynik: outcome, poWalce: p, wyleczeni: hp, sterowanie: restored });
+} catch (e) { fail('W8', 'Przegrana na mapie B', e); }
+
+// ───────────── W9. Migracja zapisu v1 (sprzed Sprintu 3) z IndexedDB ─────────────
+try {
+  await setStepRng('miss');
+  const spot = await placeWithRoom('right', 3, { terrain: 'safe' });
+  await idle(300);
+  const v1 = await S(() => {
+    const snap = structuredClone(window.__szlaki.stores.useGame.getState().snapshot());
+    const p = snap.player;
+    delete p.regionId; delete p.locationId; delete p.spawnPointId;
+    p.mapId = 'polana';
+    p.money = 4321;
+    return { ...snap, version: 1 };
+  });
+  await page.reload(); // ekran tytułowy — gra nie jest uruchomiona, autozapis nic nie nadpisze
+  await page.getByRole('button', { name: /Kontynuuj/ }).waitFor({ timeout: 15000 });
+  await idbPut({ id: 'slot1', data: v1, version: 1, updatedAt: Date.now() });
+  const stored = await idbSave();
+  await page.reload();
+  await page.getByRole('button', { name: /Kontynuuj/ }).click({ timeout: 15000 });
+  await waitJoystick();
+  await waitArrival(POLANA);
+  await setStepRng('miss');
+  const p = await where();
+  const money = await S(() => window.__szlaki.stores.useGame.getState().player.money);
+  const restored = await controlRestored(); // ruch → autozapis w nowym formacie
+  await idle(2800);
+  const resaved = await idbSave();
+  const ok = stored?.wersjaDanych === 1 && stored?.mapId === 'polana' && p.region === REGION && p.lokacja === POLANA && p.punkt === 'start' && same(p.zapisPoz, [spot.x, spot.y]) && same(p.poz, [spot.x, spot.y]) && money === 4321 && restored.ruszyl && resaved?.wersjaDanych === 2 && resaved?.wersjaWiersza === 2 && resaved?.lokacja === POLANA && resaved?.mapId === null;
+  record('W9', 'Stary zapis v1 (mapId) z IndexedDB: migracja do v2 — Polana, ta sama pozycja i pieniądze; ponowny zapis już w v2', ok, { pozycjaV1: spot, zapisV1: stored, poWczytaniu: p, pieniadze: money, zapisPoMigracji: resaved, sterowanie: restored });
+} catch (e) { fail('W9', 'Migracja zapisu v1', e); }
 
 // ───────────── U1. Wersja i ręczne sprawdzenie aktualizacji (Menu) ─────────────
 try {

@@ -1,7 +1,7 @@
 import { useShallow } from 'zustand/react/shallow';
 import { QUESTS } from '../../config/quests';
 import { CURRENCY } from '../../config/text';
-import { MAPS, TEST_MAP } from '../../game/maps/testMap';
+import { getLocation, mapOf } from '../../game/world';
 import { PhaserGame } from '../../game/PhaserGame';
 import { useGame } from '../../state/gameStore';
 import { useUi, type ModalId } from '../../state/uiStore';
@@ -18,9 +18,12 @@ export function OverworldScreen() {
   );
 }
 
+/** Nazwa strefy pod graczem albo — poza strefami — nazwa lokacji z modelu świata. */
 function useZoneName(): string {
   return useGame((s) => {
-    const map = MAPS[s.player.mapId] ?? TEST_MAP;
+    const loc = getLocation(s.player.locationId);
+    const map = loc ? mapOf(loc) : null;
+    if (!loc || !map) return loc?.name ?? '';
     const z = map.zones.find(
       (zone) =>
         s.player.x >= zone.rect.x &&
@@ -28,7 +31,7 @@ function useZoneName(): string {
         s.player.y >= zone.rect.y &&
         s.player.y < zone.rect.y + zone.rect.h,
     );
-    return z ? z.name : map.name;
+    return z && z.rect.w * z.rect.h < map.layout.length * (map.layout[0]?.length ?? 0) ? z.name : loc.name;
   });
 }
 

@@ -56,7 +56,7 @@ function freeDir() {
     let best = 'down', bestN = -1;
     for (const [k, [dx, dy]] of Object.entries(D)) {
       let n = 0;
-      for (let i = 1; i <= 6; i++) { const x = sc.tx + dx * i, y = sc.ty + dy * i; if (sc.isWalkable(x, y) && !sc.actorAt(x, y)) n++; else break; }
+      for (let i = 1; i <= 6; i++) { const x = sc.tx + dx * i, y = sc.ty + dy * i; if (sc.isWalkable(x, y) && !sc.actorAt(x, y) && !sc.exitAt(x, y)) n++; else break; }
       if (n > bestN) { bestN = n; best = k; }
     }
     return best;

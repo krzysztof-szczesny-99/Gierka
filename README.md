@@ -88,6 +88,14 @@ zapis, zbuforowane dane i sprite'y; w trawie spotkasz offline tylko gatunki, kt�
 
 - Wybór startera spośród trzech stworzeń z każdej z 9 generacji (dane i grafiki pobierane z PokéAPI po otwarciu generacji).
 - Oryginalna mapa testowa 40×32 (Polana Startowa) z czterema strefami: Łąka, Brzeg Stawu, Skalny Zakątek, Cichy Gaj.
+- Model świata (Sprint 3): region „Kraina Szlaków” i lokacje opisane danymi w `src/config/world.ts` (typ, status, mapa,
+  połączenia, punkty pojawienia się, tabele spotkań, wymagania, punkt leczenia). Druga oryginalna mapa 26×18 —
+  **Szepczący Zagajnik** (wejście ścieżką na wschodnim skraju Polany, przy drogowskazie). Ma własną tabelę spotkań
+  w paprociach (m.in. caterpie, weedle, oddish, hoothoot, seedot, skwovet, rzadko fomantis). Północna ścieżka na
+  Wzgórza Wiatru jest zablokowana komunikatem (lokacja w planach). Przejście: wygaszenie ekranu, zapis położenia,
+  2 kroki ochronne po wejściu. Przegrana w Zagajniku przenosi do Stacji Opieki na Polanie.
+- Zapis w formacie v2 (region, lokacja, punkt pojawienia się, pozycja). Starsze zapisy (v1) są migrowane automatycznie —
+  postęp i pozycja na Polanie zostają. Błędna lokacja lub pozycja w zapisie → bezpieczny punkt pojawienia się.
 - Ruch po siatce: joystick ekranowy, opcjonalnie klawiatura; bieg; kamera z dopasowaniem przybliżenia.
 - Spotkania przez jedną centralną blokadę (tylko jedno naraz, wynik walki liczony dokładnie raz, krótkie odnowienie po walce).
 - Losowe spotkania po kroku (Sprint 2): wysoka trawa (Łąka, brzeg Stawu, Cichy Gaj) — 10% na krok, skalisty grunt
@@ -112,7 +120,7 @@ zapis, zbuforowane dane i sprite'y; w trawie spotkasz offline tylko gatunki, kt�
 
 ## Zaplanowane (kolejne etapy)
 
-- Etap 2: ewolucje, natury, pierwsze zdolności, przedmioty trzymane, trenerzy z AI, druga mapa i przejścia, import map z Tiled.
+- Etap 2: ewolucje, natury, pierwsze zdolności, przedmioty trzymane, trenerzy z AI, kolejne lokacje (Wzgórza Wiatru), import map z Tiled.
 - Etap 3: walki podwójne, ruchy wieloturowe, pogoda, współdzielony EXP, lepszy magazyn.
 - Etap 4: otwarte strefy (rzut kapsułą z mapy, unik, zachowania stworzeń), pora dnia, zadania badawcze.
 - Etap 5: pierwsza przygoda (8 prób), drugi region, megaewolucje, interakcje z towarzyszem.
