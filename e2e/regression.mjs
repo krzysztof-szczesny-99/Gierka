@@ -915,14 +915,17 @@ try {
   await setStepRng('miss');
   const spot = await placeWithRoom('right', 3, { terrain: 'safe' });
   await idle(300);
-  const v1 = await S(() => {
+  // Zapis v1 budujemy ze stanu gry; pozycję ustawiamy jawnie (teleport diagnostyczny przesuwa tylko scenę).
+  const v1 = await S((spot) => {
     const snap = structuredClone(window.__szlaki.stores.useGame.getState().snapshot());
     const p = snap.player;
     delete p.regionId; delete p.locationId; delete p.spawnPointId;
     p.mapId = 'polana';
+    p.x = spot.x;
+    p.y = spot.y;
     p.money = 4321;
     return { ...snap, version: 1 };
-  });
+  }, spot);
   await page.reload(); // ekran tytułowy — gra nie jest uruchomiona, autozapis nic nie nadpisze
   await page.getByRole('button', { name: /Kontynuuj/ }).waitFor({ timeout: 15000 });
   await idbPut({ id: 'slot1', data: v1, version: 1, updatedAt: Date.now() });
@@ -937,7 +940,7 @@ try {
   const restored = await controlRestored(); // ruch → autozapis w nowym formacie
   await idle(2800);
   const resaved = await idbSave();
-  const ok = stored?.wersjaDanych === 1 && stored?.mapId === 'polana' && p.region === REGION && p.lokacja === POLANA && p.punkt === 'start' && same(p.zapisPoz, [spot.x, spot.y]) && same(p.poz, [spot.x, spot.y]) && money === 4321 && restored.ruszyl && resaved?.wersjaDanych === 2 && resaved?.wersjaWiersza === 2 && resaved?.lokacja === POLANA && resaved?.mapId === null;
+  const ok = stored?.wersjaDanych === 1 && stored?.mapId === 'polana' && same(stored.poz, [spot.x, spot.y]) && p.region === REGION && p.lokacja === POLANA && p.punkt === 'start' && same(p.zapisPoz, [spot.x, spot.y]) && same(p.poz, [spot.x, spot.y]) && money === 4321 && restored.ruszyl && resaved?.wersjaDanych === 2 && resaved?.wersjaWiersza === 2 && resaved?.lokacja === POLANA && resaved?.mapId === null;
   record('W9', 'Stary zapis v1 (mapId) z IndexedDB: migracja do v2 — Polana, ta sama pozycja i pieniądze; ponowny zapis już w v2', ok, { pozycjaV1: spot, zapisV1: stored, poWczytaniu: p, pieniadze: money, zapisPoMigracji: resaved, sterowanie: restored });
 } catch (e) { fail('W9', 'Migracja zapisu v1', e); }
 
