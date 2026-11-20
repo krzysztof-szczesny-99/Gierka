@@ -151,5 +151,10 @@ zapis, zbuforowane dane i sprite'y; w trawie spotkasz offline tylko gatunki, kt�
 
 - **„Pierwsze uruchomienie wymaga internetu”** — gra musi raz pobrać tabelę typów i krzywe EXP.
 - **Brak spotkań offline** — offline w trawie losowane są tylko gatunki, które były już pobrane.
-- **Stara wersja po aktualizacji** — service worker aktualizuje się sam; w razie potrzeby zamknij i otwórz aplikację.
+- **Stara wersja po aktualizacji** — gra porównuje swoją wersję (Menu → „Wersja gry”) z plikiem `version.json` na serwerze.
+  Gdy serwer ma nowszą, a telefon jej nie pobrał (iPhone potrafi trzymać stare pliki aplikacji z ekranu głównego),
+  na ekranie tytułowym gra aktualizuje się sama, a w trakcie gry pokazuje baner „Aktualizuj teraz”. To samo robi
+  przycisk „Sprawdź aktualizację” w Menu. Wymuszona aktualizacja zapisuje grę, usuwa bufor plików aplikacji (zapis
+  i sprite'y zostają) i wczytuje stronę z serwera. Jeśli telefon ma wersję sprzed tej poprawki — uruchom iPhone'a
+  ponownie i otwórz grę. Nie usuwaj ikony z ekranu głównego: na iPhonie usunęłoby to też zapis gry.
 - **Czyste dane** — Menu → „Wyczyść bufor danych” (dane API) lub „Usuń zapis” (postęp).

@@ -1,6 +1,7 @@
 // Nakładki globalne: dialog, komunikaty, przejście do walki, błąd krytyczny.
 
 import { Component, useEffect, type ErrorInfo, type ReactNode } from 'react';
+import { forceUpdate } from '../../services/updateService';
 import { useUi } from '../../state/uiStore';
 import { CapsuleIcon } from './common';
 
@@ -36,6 +37,29 @@ export function Toast() {
   return (
     <div className="toast" role="status" key={toast.id}>
       {toast.text}
+    </div>
+  );
+}
+
+/** Baner „nowa wersja gry” — gdy serwer ma nowszą wersję, a telefon wciąż uruchamia starą. */
+export function UpdateBanner() {
+  const target = useUi((s) => s.updateAvailable);
+  const mode = useUi((s) => s.mode);
+  const busy = useUi((s) => s.transition);
+  if (!target || busy || (mode !== 'title' && mode !== 'overworld')) return null;
+  return (
+    <div className="update-banner" role="status" data-testid="update-banner">
+      <span>Jest nowa wersja gry ({target}).</span>
+      <button
+        className="btn btn-small btn-primary"
+        onClick={async () => {
+          const r = await forceUpdate(target);
+          if (r === 'unsafe') useUi.getState().showToast('Aktualizacja będzie możliwa po walce.');
+          else if (r === 'unavailable') useUi.getState().showToast('Zamknij i otwórz grę ponownie, aby ją zaktualizować.');
+        }}
+      >
+        Aktualizuj teraz
+      </button>
     </div>
   );
 }

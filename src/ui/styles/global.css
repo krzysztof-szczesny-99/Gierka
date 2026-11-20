@@ -1097,3 +1097,22 @@ input {
   font-size: 26px;
   color: var(--accent);
 }
+
+/* ── baner nowej wersji gry ── */
+.update-banner {
+  position: absolute;
+  left: 50%;
+  top: calc(52px + var(--safe-top));
+  transform: translateX(-50%);
+  z-index: 85;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100% - 24px);
+  background: rgba(20, 36, 30, 0.97);
+  border: 1px solid var(--accent);
+  padding: 8px 12px;
+  border-radius: 14px;
+  font-size: 0.9rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}

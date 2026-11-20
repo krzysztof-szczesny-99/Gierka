@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { bootApp } from './services/bootService';
 import { useUi } from './state/uiStore';
-import { DialogBox, ErrorBoundary, Toast, TransitionOverlay } from './ui/components/Overlays';
+import { DialogBox, ErrorBoundary, Toast, TransitionOverlay, UpdateBanner } from './ui/components/Overlays';
 import { GemLogo } from './ui/components/common';
 import { EvolutionModal } from './ui/menus/EvolutionModal';
 import { LearnMoveModal } from './ui/menus/LearnMoveModal';
@@ -38,6 +38,7 @@ export default function App() {
         <EvolutionModal />
         <DialogBox />
         <TransitionOverlay />
+        <UpdateBanner />
         <Toast />
       </div>
     </ErrorBoundary>

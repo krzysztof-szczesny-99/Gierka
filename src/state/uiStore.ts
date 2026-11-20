@@ -75,6 +75,8 @@ interface UiStore {
   online: boolean;
   installPrompt: BeforeInstallPromptEvent | null;
   offlineReady: boolean;
+  /** Wersja na serwerze, gdy jest nowsza niż uruchomiona (baner „Aktualizuj”); null — brak. */
+  updateAvailable: string | null;
 
   // ── centralna blokada spotkań ──
   gameMode: GameMode;
@@ -135,6 +137,7 @@ interface UiStore {
   setOnline(v: boolean): void;
   setInstallPrompt(e: BeforeInstallPromptEvent | null): void;
   setOfflineReady(v: boolean): void;
+  setUpdateAvailable(v: string | null): void;
 }
 
 let toastId = 0;
@@ -150,6 +153,7 @@ export const useUi = create<UiStore>()((set, get) => ({
   online: typeof navigator === 'undefined' ? true : navigator.onLine !== false,
   installPrompt: null,
   offlineReady: false,
+  updateAvailable: null,
 
   gameMode: 'EXPLORATION',
   activeEncounterId: null,
@@ -279,6 +283,7 @@ export const useUi = create<UiStore>()((set, get) => ({
   setOnline: (online) => set({ online }),
   setInstallPrompt: (installPrompt) => set({ installPrompt }),
   setOfflineReady: (offlineReady) => set({ offlineReady }),
+  setUpdateAvailable: (updateAvailable) => set({ updateAvailable }),
 }));
 
 /** Czy ruch po mapie ma być zablokowany (okno, dialog, spotkanie, walka, przejście). */
