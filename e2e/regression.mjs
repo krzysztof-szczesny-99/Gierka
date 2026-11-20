@@ -32,8 +32,13 @@ const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, de
 const page = await ctx.newPage();
 page.on('pageerror', (e) => consoleIssues.push({ type: 'pageerror', text: e.message }));
 page.on('console', (m) => {
-  if ((m.type() === 'error' || m.type() === 'warning') && !m.text().includes('GL Driver Message')) consoleIssues.push({ type: m.type(), text: m.text().slice(0, 300) });
+  if ((m.type() === 'error' || m.type() === 'warning') && !m.text().includes('GL Driver Message')) {
+    // Diagnostyka: adres zasobu i ostatni zakończony test (żeby wiadomo było, skąd pochodzi błąd).
+    consoleIssues.push({ type: m.type(), text: m.text().slice(0, 300), url: m.location()?.url?.slice(0, 200) ?? null, po: results.at(-1)?.id ?? 'start' });
+  }
 });
+const failedRequests = [];
+page.on('requestfailed', (r) => failedRequests.push({ url: r.url().slice(0, 200), failure: r.failure()?.errorText ?? null, po: results.at(-1)?.id ?? 'start' }));
 
 const S = (fn, arg) => page.evaluate(fn, arg);
 const idle = (ms) => page.waitForTimeout(ms);
@@ -1260,7 +1265,7 @@ try {
 } catch (e) { fail('U1', 'Sprawdzenie aktualizacji', e); }
 
 // ───────────── R17. Konsola ─────────────
-record('R17', 'Brak błędów i ostrzeżeń w konsoli (bez komunikatów sterownika GL)', consoleIssues.length === 0, consoleIssues);
+record('R17', 'Brak błędów i ostrzeżeń w konsoli (bez komunikatów sterownika GL)', consoleIssues.length === 0, { konsola: consoleIssues, nieudaneZapytania: failedRequests.slice(-20) });
 await shot('r17-end');
 
 await browser.close();
