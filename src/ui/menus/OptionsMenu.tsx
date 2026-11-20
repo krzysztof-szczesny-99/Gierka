@@ -4,7 +4,7 @@ import { versionLabel } from '../../config/version';
 import { cacheStats, clearApiCache } from '../../data/repository';
 import { deleteSave, exportSave, getLastSaveAt, importSave, saveNow } from '../../data/saveGame';
 import { errorMessage } from '../../services/creatureService';
-import { checkForUpdate } from '../../services/updateService';
+import { checkForUpdate, forceUpdate } from '../../services/updateService';
 import { useGame, type Settings } from '../../state/gameStore';
 import { useUi } from '../../state/uiStore';
 import { Modal } from '../components/common';
@@ -180,7 +180,14 @@ export function OptionsMenu() {
             await saveNow().catch(() => undefined);
             const r = await checkForUpdate();
             setChecking(false);
-            const text: Record<typeof r, string> = {
+            if (r === 'outdated') {
+              // Telefon nie pobrał nowej wersji sam — gracz poprosił o aktualizację, więc ją wymuszamy.
+              const target = useUi.getState().updateAvailable;
+              toast(`Na serwerze jest nowsza wersja (${target}) — aktualizuję… Postęp jest zapisany.`);
+              if (target) await forceUpdate(target);
+              return;
+            }
+            const text: Record<Exclude<typeof r, 'outdated'>, string> = {
               'up-to-date': 'Masz najnowszą wersję gry.',
               downloading: 'Pobieram nową wersję — gra za chwilę uruchomi się ponownie (postęp jest zapisany).',
               offline: 'Brak internetu — nie można sprawdzić aktualizacji.',

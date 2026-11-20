@@ -1264,6 +1264,61 @@ try {
   record('U1', 'Menu pokazuje wersję gry; „Sprawdź aktualizację” pyta serwer (service worker) i odpowiada', /^[0-9a-f]{7}/.test(version) && toast === 'Masz najnowszą wersję gry.' && sw.kontroluje, { wersja: version, komunikat: toast, serviceWorker: sw });
 } catch (e) { fail('U1', 'Sprawdzenie aktualizacji', e); }
 
+// ───────────── U2. Serwer ma nowszą wersję, a telefon jej nie pobrał (iOS): baner i wymuszona aktualizacja ─────────────
+try {
+  await waitJoystick();
+  const VERSION_ROUTE = '**/version.json*';
+  const serveVersion = (v) => page.route(VERSION_ROUTE, (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ version: v, builtAt: '' }) }));
+  // Liczymy pełne wczytania dokumentu (zdarzenie „load”) — zmiana adresu przez history.replaceState
+  // (usunięcie parametru ?u=) nie jest przeładowaniem.
+  let navigations = 0;
+  const onNav = () => { navigations += 1; };
+  page.on('load', onNav);
+  await serveVersion('0000000');
+  const inGame = await S(() => window.__szlaki.update.checkForUpdate());
+  await page.getByTestId('update-banner').waitFor({ timeout: 10000 });
+  const bannerText = (await page.getByTestId('update-banner').textContent()) ?? '';
+  const navBeforeClick = navigations; // w grze bez automatycznego przeładowania
+  const nav = page.waitForEvent('load', { timeout: 30000 });
+  await page.getByTestId('update-banner').getByRole('button', { name: 'Aktualizuj teraz' }).click();
+  await nav;
+  await page.getByRole('button', { name: /Kontynuuj/ }).waitFor({ timeout: 30000 });
+  // Na ekranie tytułowym serwer nadal „ma nowszą wersję” — ochrona przed pętlą: brak drugiego przeładowania, jest baner.
+  await page.getByTestId('update-banner').waitFor({ timeout: 20000 });
+  await idle(1500);
+  const afterManual = {
+    przeladowania: navigations,
+    adres: page.url(),
+    bufory: await S(async () => (typeof caches === 'undefined' ? [] : caches.keys())),
+    zapis: (await idbSave())?.wersjaDanych ?? null,
+  };
+  // Automatyczna wymuszona aktualizacja przy starcie (nowa wersja na serwerze, ekran tytułowy).
+  await page.unroute(VERSION_ROUTE);
+  await serveVersion('1111111');
+  const navAuto0 = navigations;
+  await page.reload();
+  // Czekamy na drugie wczytanie (wymuszone przez grę) — najwyżej 30 s.
+  for (let i = 0; i < 150 && navigations - navAuto0 < 2; i++) await idle(200);
+  await page.getByRole('button', { name: /Kontynuuj/ }).waitFor({ timeout: 30000 });
+  await page.getByTestId('update-banner').waitFor({ timeout: 20000 });
+  await idle(1500);
+  const autoNavs = navigations - navAuto0; // ręczne przeładowanie + jedno wymuszone (bez pętli)
+  await page.unroute(VERSION_ROUTE);
+  await page.getByRole('button', { name: /Kontynuuj/ }).click();
+  await waitJoystick();
+  await page.waitForFunction(async () => (await navigator.serviceWorker.getRegistrations()).length > 0, null, { timeout: 20000 });
+  const fresh = await S(() => window.__szlaki.update.checkForUpdate());
+  await idle(300);
+  const bannerGone = (await page.getByTestId('update-banner').count()) === 0;
+  page.off('load', onNav);
+  const ok =
+    inGame === 'outdated' && bannerText.includes('0000000') && navBeforeClick === 0 &&
+    afterManual.przeladowania === 1 && !/[?&]u=/.test(afterManual.adres) && /[?&]debug/.test(afterManual.adres) &&
+    afterManual.bufory.includes('pokeapi-sprites') && afterManual.zapis === SAVE_V &&
+    autoNavs === 2 && fresh === 'up-to-date' && bannerGone;
+  record('U2', 'Nowsza wersja na serwerze bez aktualizacji service workera: baner w grze, „Aktualizuj teraz” przeładowuje z serwera (zapis i sprite’y zostają); na ekranie tytułowym aktualizacja sama, bez pętli', ok, { wGrze: inGame, baner: bannerText, poRecznej: afterManual, przeladowaniaAuto: autoNavs, poPowrocie: fresh, banerZnika: bannerGone });
+} catch (e) { fail('U2', 'Wymuszona aktualizacja', e); }
+
 // ───────────── R17. Konsola ─────────────
 record('R17', 'Brak błędów i ostrzeżeń w konsoli (bez komunikatów sterownika GL)', consoleIssues.length === 0, { konsola: consoleIssues, nieudaneZapytania: failedRequests.slice(-20) });
 await shot('r17-end');

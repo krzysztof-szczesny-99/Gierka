@@ -1,13 +1,30 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
 // Hosty tuneli HTTPS używanych do testów PWA na telefonie (patrz README).
 const tunnelHosts = ['.trycloudflare.com', '.loca.lt', '.ngrok-free.app'];
 
-export default defineConfig({
+/**
+ * version.json w buildzie: gra porównuje swoją wersję z wersją na serwerze z pominięciem buforów
+ * (iPhone potrafi długo trzymać stare pliki aplikacji z ekranu głównego). Plik nie trafia do bufora offline.
+ */
+function versionFile(env: Record<string, string>): Plugin {
+  return {
+    name: 'szlaki-version-file',
+    apply: 'build',
+    generateBundle() {
+      const version = (env.VITE_APP_VERSION ?? '').trim().slice(0, 7) || 'dev';
+      const builtAt = (env.VITE_BUILD_TIME ?? '').trim();
+      this.emitFile({ type: 'asset', fileName: 'version.json', source: JSON.stringify({ version, builtAt }) });
+    },
+  };
+}
+
+export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
+    versionFile(loadEnv(mode, '.', 'VITE_')),
     VitePWA({
       registerType: 'autoUpdate',
       injectRegister: false, // rejestrujemy ręcznie w src/main.tsx
@@ -66,4 +83,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));

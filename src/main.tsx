@@ -13,7 +13,18 @@ import { buildStarter } from './services/creatureService';
 import { configureEncounterDeps } from './services/encounterService';
 import { evolutionInfo, levelEvolutionFor } from './services/evolutionService';
 import { cleanupSpriteCacheOnce } from './services/spriteCache';
-import { checkForUpdate, installUpdateChecks, setUpdateRegistration } from './services/updateService';
+import { APP_VERSION } from './config/version';
+import { saveNow } from './data/saveGame';
+import {
+  browserForceUpdateEnv,
+  checkForUpdate,
+  forceUpdate,
+  httpVersionSource,
+  installUpdateChecks,
+  setForceUpdateEnv,
+  setUpdateRegistration,
+  setVersionSource,
+} from './services/updateService';
 import { useBattle } from './state/battleStore';
 import { useGame } from './state/gameStore';
 import { useUi, type BeforeInstallPromptEvent } from './state/uiStore';
@@ -25,7 +36,7 @@ if (seed !== null) gameRng.reseed(seed);
 
 expose('stores', { useGame, useUi, useBattle, bus });
 expose('input', { joystick, virtualInput });
-expose('update', { checkForUpdate });
+expose('update', { checkForUpdate, forceUpdate });
 expose('world', { WORLD, validateWorld });
 // Scenariusze E2E (tylko ?debug): budowanie stworzenia z danych PokéAPI i stan ewolucji.
 expose('creatures', { buildStarter, evolutionInfo, levelEvolutionFor, getGrowth, NATURES, rng: gameRng });
@@ -48,9 +59,22 @@ window.addEventListener('beforeinstallprompt', (e) => {
 });
 window.addEventListener('appinstalled', () => useUi.getState().setInstallPrompt(null));
 
+// Po wymuszonej aktualizacji adres ma parametr ?u=… (omija bufor) — usuwamy go, zostawiając resztę.
+{
+  const url = new URL(window.location.href);
+  if (url.searchParams.has('u')) {
+    url.searchParams.delete('u');
+    window.history.replaceState(null, '', url.toString());
+  }
+}
+
 // Service worker działa tylko w bezpiecznym kontekście (HTTPS lub localhost).
 if ('serviceWorker' in navigator && window.isSecureContext) {
   cleanupSpriteCacheOnce();
+  // Porównanie z version.json na serwerze i wymuszona aktualizacja (iOS bywa „przyklejony” do starej wersji).
+  const base = (import.meta as ImportMeta & { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/';
+  setVersionSource(httpVersionSource(APP_VERSION, `${base}version.json`));
+  setForceUpdateEnv(browserForceUpdateEnv(saveNow));
   registerSW({
     immediate: true,
     // Aplikacja z ekranu głównego bywa tylko wznawiana z tła — sprawdzamy aktualizacje jawnie (updateService).
