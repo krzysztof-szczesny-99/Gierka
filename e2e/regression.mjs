@@ -1269,15 +1269,17 @@ try {
   await waitJoystick();
   const VERSION_ROUTE = '**/version.json*';
   const serveVersion = (v) => page.route(VERSION_ROUTE, (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ version: v, builtAt: '' }) }));
+  // Liczymy pełne wczytania dokumentu (zdarzenie „load”) — zmiana adresu przez history.replaceState
+  // (usunięcie parametru ?u=) nie jest przeładowaniem.
   let navigations = 0;
-  const onNav = (f) => { if (f === page.mainFrame()) navigations += 1; };
-  page.on('framenavigated', onNav);
+  const onNav = () => { navigations += 1; };
+  page.on('load', onNav);
   await serveVersion('0000000');
   const inGame = await S(() => window.__szlaki.update.checkForUpdate());
   await page.getByTestId('update-banner').waitFor({ timeout: 10000 });
   const bannerText = (await page.getByTestId('update-banner').textContent()) ?? '';
   const navBeforeClick = navigations; // w grze bez automatycznego przeładowania
-  const nav = page.waitForEvent('framenavigated', { predicate: (f) => f === page.mainFrame(), timeout: 30000 });
+  const nav = page.waitForEvent('load', { timeout: 30000 });
   await page.getByTestId('update-banner').getByRole('button', { name: 'Aktualizuj teraz' }).click();
   await nav;
   await page.getByRole('button', { name: /Kontynuuj/ }).waitFor({ timeout: 30000 });
@@ -1308,7 +1310,7 @@ try {
   const fresh = await S(() => window.__szlaki.update.checkForUpdate());
   await idle(300);
   const bannerGone = (await page.getByTestId('update-banner').count()) === 0;
-  page.off('framenavigated', onNav);
+  page.off('load', onNav);
   const ok =
     inGame === 'outdated' && bannerText.includes('0000000') && navBeforeClick === 0 &&
     afterManual.przeladowania === 1 && !/[?&]u=/.test(afterManual.adres) && /[?&]debug/.test(afterManual.adres) &&
