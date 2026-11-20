@@ -1,24 +1,28 @@
-name: Diagnostyka wdrożenia (jednorazowa)
+name: Diagnostyka (jednorazowa)
 on:
   push:
     branches: [e2e-results-diag-live]
 jobs:
   live:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
-      - name: Nagłówki i wersja na żywej stronie
+      - name: Szczegóły ewolucji z PokéAPI
         run: |
-          B=https://krzysztof-szczesny-99.github.io/Gierka
-          for f in "" sw.js manifest.webmanifest; do echo "== $B/$f"; curl -sSI "$B/$f" | grep -iE "^(HTTP|cache-control|age|last-modified|etag|x-cache|x-served-by|date)"; done
-          curl -sS "$B/" -o index.html
-          echo "== skrypty w index.html"; grep -oE 'src="[^"]+\.js"' index.html
-          main=$(grep -oE '/Gierka/assets/index-[^"]+\.js' index.html | head -1); echo "main=$main"
-          curl -sS "https://krzysztof-szczesny-99.github.io$main" -o main.js
-          echo "== wersja w bundlu"; grep -oE '835d0fa[0-9a-f]*|894c2b4[0-9a-f]*' main.js | sort | uniq -c
-          grep -oE 'szepczacy-zagajnik' main.js | head -1 || true
-          curl -sS "$B/sw.js" -o sw.js
-          echo "== sw.js rozmiar: $(wc -c < sw.js)"
-          echo "== wpisy precache i statusy"
-          grep -oE 'url:"[^"]+"' sw.js | sed 's/url:"//;s/"$//' | while read u; do code=$(curl -s -o /dev/null -w '%{http_code}' "$B/$u"); echo "$code $u"; done
-          grep -oE '"workbox-[a-z0-9]+\.js"|workbox-[a-z0-9]+' sw.js | sort -u | head
+          for id in 1 67 4; do
+            echo "== evolution-chain/$id"
+            curl -sS "https://pokeapi.co/api/v2/evolution-chain/$id/" | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)
+          def walk(l):
+              for n in l["evolves_to"]:
+                  for det in n["evolution_details"]:
+                      setv={k:v for k,v in det.items() if v not in (None, False, "", [] , 0) or k=="min_level"}
+                      print(l["species"]["name"], "->", n["species"]["name"], json.dumps(setv, ensure_ascii=False))
+                  walk(n)
+          walk(d["chain"])
+          first=d["chain"]["evolves_to"][0]["evolution_details"][0]
+          print("KLUCZE:", sorted(first.keys()))
+          print("ZERA/INNE:", {k:v for k,v in first.items() if v == 0 or (isinstance(v,(int,float)) and not isinstance(v,bool))})
+          '
+          done
