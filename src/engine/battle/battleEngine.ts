@@ -13,6 +13,16 @@ import type { BoostKey, Creature, GrowthTable, MajorStatus, MoveData, PokemonDat
 import { chooseMove } from './ai';
 import { attemptCatch } from './catch';
 import { calcDamage } from './damage';
+import {
+  abilityBlocksFoeDrop,
+  abilityBlocksStatus,
+  abilityEffect,
+  abilityName,
+  heldEffect,
+  heldEvMultiplier,
+  heldName,
+  heldSpeedMultiplier,
+} from './effects';
 import { AILMENT_TO_STATUS, canReceiveStatus, STATUS_INFLICT_TEXT } from './status';
 import {
   EMPTY_BOOSTS,
@@ -67,6 +77,14 @@ function unknownMove(name: string): MoveData {
   return { ...STRUGGLE, name, displayName: name, power: 40, meta: { ...baseMeta } };
 }
 
+const STATUS_NAME: Record<MajorStatus, string> = {
+  par: 'paraliżem',
+  slp: 'snem',
+  frz: 'zamrożeniem',
+  brn: 'oparzeniem',
+  psn: 'zatruciem',
+};
+
 const STAT_NAME: Record<BoostKey, string> = {
   atk: 'Atak',
   def: 'Obrona',
@@ -106,7 +124,7 @@ export function battleLabel(state: BattleState, side: SideIndex, c: Creature): s
 
 function effectiveSpeed(state: BattleState, c: Creature): number {
   const par = c.status === 'par' ? RULES.paralysisSpeedMultiplier : 1;
-  return Math.floor(c.stats.spe * stageMultiplier(boostsOf(state, c.uid).spe) * par);
+  return Math.floor(c.stats.spe * stageMultiplier(boostsOf(state, c.uid).spe) * par * heldSpeedMultiplier(c));
 }
 
 function cloneState(s: BattleState): BattleState {
@@ -138,7 +156,34 @@ function applyDamage(
   const dealt = Math.min(c.hp, Math.max(0, Math.floor(amount)));
   c.hp -= dealt;
   events.push({ t: 'hp', side, uid: c.uid, hp: c.hp, maxHp: c.stats.hp, delta: -dealt, crit: extra.crit, eff: extra.eff });
+  if (dealt > 0) pinchBerry(state, side, c, events);
   return dealt;
+}
+
+/** Jagoda leczy, gdy PŻ spadną do progu (jednorazowo — przedmiot znika). */
+function pinchBerry(state: BattleState, side: SideIndex, c: Creature, events: BattleEvent[]): void {
+  const berry = heldEffect(c, 'pinch-berry');
+  if (!berry || c.hp <= 0 || c.hp > Math.floor(c.stats.hp * berry.threshold)) return;
+  const item = heldName(c);
+  c.heldItemId = null;
+  const healed = healBy(state, side, c, berry.amount, events);
+  events.push(msg(`${battleLabel(state, side, c)} zjada: ${item} i odzyskuje ${healed} PŻ!`));
+}
+
+/** Jagoda leczy nałożony status albo dezorientację (jednorazowo). */
+function statusBerry(state: BattleState, side: SideIndex, c: Creature, events: BattleEvent[]): void {
+  if (!heldEffect(c, 'status-berry')) return;
+  const v = volOf(state, c.uid);
+  if (!c.status && v.confusion <= 0) return;
+  const item = heldName(c);
+  c.heldItemId = null;
+  if (c.status) {
+    c.status = null;
+    c.sleepTurns = 0;
+    events.push({ t: 'status', side, uid: c.uid, status: null });
+  }
+  v.confusion = 0;
+  events.push(msg(`${battleLabel(state, side, c)} zjada: ${item} i od razu czuje się lepiej!`));
 }
 
 function healBy(state: BattleState, side: SideIndex, c: Creature, amount: number, events: BattleEvent[]): number {
@@ -157,22 +202,35 @@ function inflictStatus(
   events: BattleEvent[],
 ): boolean {
   if (!canReceiveStatus(c, status)) return false;
+  if (abilityBlocksStatus(c, status)) {
+    events.push(msg(`${battleLabel(state, side, c)}: zdolność ${abilityName(c)} chroni przed ${STATUS_NAME[status]}!`));
+    return false;
+  }
   c.status = status;
   c.sleepTurns = status === 'slp' ? rng.int(RULES.sleepTurns[0], RULES.sleepTurns[1]) : 0;
   events.push({ t: 'status', side, uid: c.uid, status });
   events.push(msg(`${battleLabel(state, side, c)} ${STATUS_INFLICT_TEXT[status]}`));
+  statusBerry(state, side, c, events);
   return true;
 }
 
 function confuse(state: BattleState, side: SideIndex, c: Creature, rng: Rng, events: BattleEvent[]): boolean {
   const v = volOf(state, c.uid);
   if (c.hp <= 0 || v.confusion > 0) return false;
+  if (abilityEffect(c, 'confusion-immunity')) {
+    events.push(msg(`${battleLabel(state, side, c)}: zdolność ${abilityName(c)} chroni przed dezorientacją!`));
+    return false;
+  }
   v.confusion = rng.int(RULES.confusionTurns[0], RULES.confusionTurns[1]) + 1;
   events.push(msg(`${battleLabel(state, side, c)} jest zdezorientowany!`));
+  statusBerry(state, side, c, events);
   return true;
 }
 
-/** Zwraca true, jeśli coś wypisano (zmiana albo informacja o limicie). */
+/**
+ * Zwraca true, jeśli coś wypisano (zmiana, informacja o limicie albo o ochronie zdolnością).
+ * `fromFoe` — zmianę wywołuje przeciwnik (zdolności chroniące działają tylko wtedy).
+ */
 function applyBoost(
   state: BattleState,
   side: SideIndex,
@@ -181,11 +239,16 @@ function applyBoost(
   change: number,
   events: BattleEvent[],
   silentFail: boolean,
+  fromFoe = false,
 ): boolean {
   const b = boostsOf(state, c.uid);
   const before = b[stat];
   const after = Math.max(-6, Math.min(6, before + change));
   const who = battleLabel(state, side, c);
+  if (change < 0 && fromFoe && abilityBlocksFoeDrop(c, stat)) {
+    events.push(msg(`${who}: zdolność ${abilityName(c)} nie pozwala obniżyć statystyki ${STAT_NAME[stat].toLowerCase()}!`));
+    return true;
+  }
   if (after === before) {
     if (silentFail) return false;
     events.push(msg(`${who}: ${STAT_NAME[stat].toLowerCase()} nie może już bardziej ${change > 0 ? 'wzrosnąć' : 'spaść'}!`));
@@ -261,7 +324,21 @@ export function createWildBattle(p: WildBattleParams): TurnResult {
   if (enemy.shiny) events.push(msg('Jego barwy lśnią niezwykłym blaskiem!'));
   events.push({ t: 'sendOut', side: 0, uid: party[lead].uid });
   events.push(msg(`Naprzód, ${displayName(party[lead])}!`));
+  // Zdolności działające przy wejściu (np. „Groźne spojrzenie”): najpierw dzikie, potem stworzenie gracza.
+  onEntry(state, 1, enemy, events);
+  onEntry(state, 0, party[lead], events);
   return { state, events };
+}
+
+/** Zdolność działająca przy wejściu do walki: obniżenie statystyki aktywnego przeciwnika. */
+function onEntry(state: BattleState, side: SideIndex, c: Creature, events: BattleEvent[]): void {
+  const e = abilityEffect(c, 'entry-lower-foe');
+  if (!e || c.hp <= 0) return;
+  const foeSide = other(side);
+  const foe = getActive(state, foeSide);
+  if (!foe || foe.hp <= 0) return;
+  events.push(msg(`${battleLabel(state, side, c)}: ${abilityName(c)}!`));
+  applyBoost(state, foeSide, foe, e.stat, e.change, events, false, true);
 }
 
 // ───────────────────────────── przebieg tury ─────────────────────────────
@@ -271,6 +348,8 @@ interface QueuedMove {
   uid: string;
   moveIndex: number;
   priority: number;
+  /** Przedmiot „pierwszeństwa” zadziałał w tej turze (w obrębie priorytetu przed szybkością). */
+  first: boolean;
   speed: number;
   tie: number;
 }
@@ -278,7 +357,9 @@ interface QueuedMove {
 function queueEntry(state: BattleState, side: SideIndex, c: Creature, moveIndex: number, rng: Rng): QueuedMove {
   const slot = moveIndex >= 0 ? c.moves[moveIndex] : undefined;
   const priority = slot ? (state.moves[slot.name]?.priority ?? 0) : 0;
-  return { side, uid: c.uid, moveIndex, priority, speed: effectiveSpeed(state, c), tie: rng.next() };
+  const claw = heldEffect(c, 'move-first');
+  const first = claw ? rng.chance(claw.chance) : false;
+  return { side, uid: c.uid, moveIndex, priority, first, speed: effectiveSpeed(state, c), tie: rng.next() };
 }
 
 export function resolveTurn(input: BattleState, action: PlayerAction, rng: Rng): TurnResult {
@@ -312,7 +393,7 @@ export function resolveTurn(input: BattleState, action: PlayerAction, rng: Rng):
   const aiMode = state.sides[1].kind === 'trainer' ? 'smart' : 'random';
   const enemyMove = chooseMove(enemy, player, state.moves, state.typeChart, rng, aiMode);
   queue.push(queueEntry(state, 1, enemy, enemyMove, rng));
-  queue.sort((a, b) => b.priority - a.priority || b.speed - a.speed || a.tie - b.tie);
+  queue.sort((a, b) => b.priority - a.priority || Number(b.first) - Number(a.first) || b.speed - a.speed || a.tie - b.tie);
 
   for (const q of queue) {
     if (state.outcome || state.awaitingSwitch) break;
@@ -320,13 +401,14 @@ export function resolveTurn(input: BattleState, action: PlayerAction, rng: Rng):
     if (!user || user.uid !== q.uid || user.hp <= 0) continue;
     const target = getActive(state, other(q.side));
     if (!target || target.hp <= 0) continue;
+    if (q.first) events.push(msg(`${battleLabel(state, q.side, user)} rusza błyskawicznie dzięki: ${heldName(user)}!`));
     executeMove(state, q.side, user, target, q.moveIndex, rng, events);
     handleFaints(state, events);
   }
 
-  // 3) Efekty końca tury (oparzenie, trucizna).
+  // 3) Efekty końca tury (zdolności, oparzenie, trucizna, przedmioty leczące).
   if (!state.outcome) {
-    endOfTurn(state, events);
+    endOfTurn(state, rng, events);
     handleFaints(state, events);
   }
   return { state, events };
@@ -347,7 +429,14 @@ function tryRun(state: BattleState, rng: Rng, events: BattleEvent[]): boolean {
     return false;
   }
   state.escapeAttempts += 1;
-  const ps = effectiveSpeed(state, getActive(state, 0)!);
+  const runner = getActive(state, 0)!;
+  if (abilityEffect(runner, 'sure-escape')) {
+    events.push(msg(`${displayName(runner)}: zdolność ${abilityName(runner)} — ucieczka zawsze się udaje!`));
+    events.push(msg('Udało się bezpiecznie uciec!'));
+    setOutcome(state, 'fled', events);
+    return true;
+  }
+  const ps = effectiveSpeed(state, runner);
   const es = effectiveSpeed(state, getActive(state, 1)!);
   let ok = ps >= es;
   if (!ok) {
@@ -384,6 +473,7 @@ function switchIn(state: BattleState, side: SideIndex, idx: number, events: Batt
   events.push({ t: 'sendOut', side, uid: incoming.uid });
   events.push(msg(side === 0 ? `Naprzód, ${displayName(incoming)}!` : `${s.name} wysyła: ${displayName(incoming)}!`));
   if (side === 0 && !state.participants.includes(incoming.uid)) state.participants.push(incoming.uid);
+  onEntry(state, side, incoming, events);
   return true;
 }
 
@@ -469,7 +559,8 @@ function executeMove(
   // — statusy blokujące ruch —
   if (user.status === 'slp') {
     if (user.sleepTurns > 0) {
-      user.sleepTurns -= 1;
+      // „Ranny ptaszek”: sen mija dwa razy szybciej.
+      user.sleepTurns = Math.max(0, user.sleepTurns - (abilityEffect(user, 'fast-wake') ? 2 : 1));
       events.push(msg(`${name} śpi głęboko.`));
       return;
     }
@@ -552,6 +643,19 @@ function executeMove(
   }
 
   const typeless = move === STRUGGLE;
+  // „Chłonięcie wody”: ruch danego typu leczy cel zamiast zadawać obrażenia.
+  const absorb = typeless ? null : abilityEffect(target, 'absorb-type');
+  if (absorb && move.type === absorb.type) {
+    const healed = target.hp < target.stats.hp ? healBy(state, foeSide, target, Math.max(1, Math.floor(target.stats.hp * absorb.healFraction)), events) : 0;
+    events.push(
+      msg(
+        healed > 0
+          ? `${battleLabel(state, foeSide, target)}: zdolność ${abilityName(target)} — odzyskuje ${healed} PŻ!`
+          : `${battleLabel(state, foeSide, target)}: zdolność ${abilityName(target)} — ruch nie działa!`,
+      ),
+    );
+    return;
+  }
   const eff = typeless ? 1 : effectiveness(state.typeChart, move.type, target.types);
   if (eff === 0) {
     events.push(msg('Ten ruch nie działa na cel…'));
@@ -604,8 +708,9 @@ function executeMove(
     }
   }
 
-  // — efekty dodatkowe —
-  if (meta && target.hp > 0) {
+  // — efekty dodatkowe („Pyłek osłonny” celu je blokuje) —
+  const shielded = !!abilityEffect(target, 'block-secondary');
+  if (meta && target.hp > 0 && !shielded) {
     if (meta.ailmentChance > 0 && rng.chance(meta.ailmentChance / 100)) {
       const st = AILMENT_TO_STATUS[meta.ailment];
       if (st) inflictStatus(state, foeSide, target, st, rng, events);
@@ -614,13 +719,15 @@ function executeMove(
     if (meta.flinchChance > 0 && rng.chance(meta.flinchChance / 100)) volOf(state, target.uid).flinch = true;
   }
   if (move.statChanges.length) {
-    const chance = meta && meta.statChance > 0 ? meta.statChance : 100;
-    if (rng.chance(chance / 100)) {
-      const toUser = statChangeHitsUser(move);
-      const recipient = toUser ? user : target;
-      const rSide = toUser ? side : foeSide;
-      if (recipient.hp > 0) {
-        for (const sc of move.statChanges) applyBoost(state, rSide, recipient, sc.stat, sc.change, events, true);
+    const toUser = statChangeHitsUser(move);
+    if (toUser || !shielded) {
+      const chance = meta && meta.statChance > 0 ? meta.statChance : 100;
+      if (rng.chance(chance / 100)) {
+        const recipient = toUser ? user : target;
+        const rSide = toUser ? side : foeSide;
+        if (recipient.hp > 0) {
+          for (const sc of move.statChanges) applyBoost(state, rSide, recipient, sc.stat, sc.change, events, true, !toUser);
+        }
       }
     }
   }
@@ -644,6 +751,10 @@ function applyStatusMove(
   if (move.name === 'rest') {
     if (user.hp >= user.stats.hp) {
       events.push(msg(`${name} ma już pełne PŻ!`));
+      return;
+    }
+    if (abilityBlocksStatus(user, 'slp')) {
+      events.push(msg(`${name}: zdolność ${abilityName(user)} nie pozwala zasnąć!`));
       return;
     }
     healBy(state, side, user, user.stats.hp, events);
@@ -675,8 +786,11 @@ function applyStatusMove(
         return;
       }
       did = inflictStatus(state, vSide, victim, st, rng, events) || did;
+      // Ochrona zdolnością już wypisała komunikat.
+      if (canReceiveStatus(victim, st) && abilityBlocksStatus(victim, st)) did = true;
     } else if (meta.ailment === 'confusion') {
       did = confuse(state, vSide, victim, rng, events) || did;
+      if (abilityEffect(victim, 'confusion-immunity') && victim.hp > 0) did = true;
     }
   }
 
@@ -684,20 +798,35 @@ function applyStatusMove(
     const toUser = statChangeHitsUser(move);
     const recipient = toUser ? user : target;
     const rSide = toUser ? side : foeSide;
-    for (const sc of move.statChanges) did = applyBoost(state, rSide, recipient, sc.stat, sc.change, events, false) || did;
+    for (const sc of move.statChanges) did = applyBoost(state, rSide, recipient, sc.stat, sc.change, events, false, !toUser) || did;
   }
 
   if (!did) events.push(msg('Ale nic się nie dzieje…'));
 }
 
-function endOfTurn(state: BattleState, events: BattleEvent[]): void {
+function endOfTurn(state: BattleState, rng: Rng, events: BattleEvent[]): void {
   for (const side of [0, 1] as SideIndex[]) {
     const c = getActive(state, side);
     if (!c || c.hp <= 0) continue;
+    // „Zrzucanie skóry”: szansa na wyleczenie statusu.
+    const cure = abilityEffect(c, 'end-turn-cure');
+    if (cure && c.status && rng.chance(cure.chance)) {
+      c.status = null;
+      c.sleepTurns = 0;
+      events.push({ t: 'status', side, uid: c.uid, status: null });
+      events.push(msg(`${battleLabel(state, side, c)}: zdolność ${abilityName(c)} leczy status!`));
+    }
     if (c.status === 'brn' || c.status === 'psn') {
       const frac = c.status === 'brn' ? RULES.burnDamage : RULES.poisonDamage;
+      const kind = c.status === 'brn' ? 'oparzenia' : 'trucizny';
       applyDamage(state, side, c, Math.max(1, Math.floor(c.stats.hp * frac)), events);
-      events.push(msg(`${battleLabel(state, side, c)} cierpi z powodu ${c.status === 'brn' ? 'oparzenia' : 'trucizny'}!`));
+      events.push(msg(`${battleLabel(state, side, c)} cierpi z powodu ${kind}!`));
+    }
+    // Przedmiot leczący co turę.
+    const leftovers = heldEffect(c, 'end-turn-heal');
+    if (leftovers && c.hp > 0 && c.hp < c.stats.hp) {
+      const healed = healBy(state, side, c, Math.max(1, Math.floor(c.stats.hp * leftovers.fraction)), events);
+      events.push(msg(`${battleLabel(state, side, c)} odzyskuje ${healed} PŻ dzięki: ${heldName(c)}.`));
     }
   }
 }
@@ -750,7 +879,11 @@ function awardExp(state: BattleState, defeated: Creature, events: BattleEvent[])
     participants: alive.length,
   });
   for (const c of alive) {
-    if (data) c.evs = addEvs(c.evs, data.evYield);
+    if (data) {
+      const mult = heldEvMultiplier(c);
+      const gain = mult === 1 ? data.evYield : (Object.fromEntries(Object.entries(data.evYield).map(([k, v]) => [k, v * mult])) as typeof data.evYield);
+      c.evs = addEvs(c.evs, gain);
+    }
     gainExp(state, c, each, events);
   }
 }
@@ -767,7 +900,7 @@ function gainExp(state: BattleState, c: Creature, amount: number, events: Battle
     const oldMax = c.stats.hp;
     c.level += 1;
     if (data) {
-      c.stats = calcStats(data.baseStats, c.ivs, c.evs, c.level);
+      c.stats = calcStats(data.baseStats, c.ivs, c.evs, c.level, c.nature);
       if (c.hp > 0) c.hp = Math.min(c.stats.hp, c.hp + Math.max(0, c.stats.hp - oldMax));
     }
     events.push({ t: 'levelUp', uid: c.uid, level: c.level, hp: c.hp, maxHp: c.stats.hp });

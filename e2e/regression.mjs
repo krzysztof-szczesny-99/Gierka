@@ -1,5 +1,6 @@
 // Testy regresji E2E (Sprint 1: joystick i blokada spotkań; Sprint 2: tereny i losowe spotkania;
-// Sprint 3: model świata, dwie lokacje, przejścia, zapis lokacji i migracja zapisu)
+// Sprint 3: model świata, dwie lokacje, przejścia, zapis lokacji i migracja zapisu;
+// Sprint 4: natury, zdolności, przedmioty trzymane, ewolucje, zapis v3)
 // na prawdziwym buildzie (Phaser + PokéAPI). Ruch wyłącznie przez joystick ekranowy (zdarzenia wskaźnika)
 // i klawiaturę — bez tap-to-move. Losowość: ziarno gry z adresu (?debug&seed=…) oraz kontrolowane źródło
 // rzutu na spotkanie (stepRng) ustawiane przez tryb diagnostyczny. Tryb ?debug służy tylko do odczytu stanu
@@ -713,6 +714,8 @@ try {
 } catch (e) { fail('T13', 'Wejście na mapę', e); }
 
 // ═════════════ Sprint 3: model świata, dwie lokacje, przejścia, zapis lokacji ═════════════
+/** Bieżąca wersja formatu zapisu (Sprint 4: v3). */
+const SAVE_V = 3;
 const REGION = 'kraina-szlakow';
 const POLANA = 'polana-startowa';
 const ZAGAJNIK = 'szepczacy-zagajnik';
@@ -742,7 +745,9 @@ const idbSave = () => S(() => new Promise((resolve, reject) => {
     q.onsuccess = () => {
       db.close();
       const row = q.result;
-      resolve(row ? { wersjaWiersza: row.version, wersjaDanych: row.data.version, region: row.data.player.regionId ?? null, lokacja: row.data.player.locationId ?? null, punkt: row.data.player.spawnPointId ?? null, mapId: row.data.player.mapId ?? null, poz: [row.data.player.x, row.data.player.y], pieniadze: row.data.player.money } : null);
+      const c = row?.data?.party?.[0] ?? null;
+      const stworzenie = c ? { pokemon: c.pokemon, nature: c.nature ?? null, abilityId: c.abilityId ?? null, ability: c.ability ?? null, heldItemId: c.heldItemId ?? null, heldItem: c.heldItem ?? null, evolutionState: c.evolutionState ?? null, stats: c.stats } : null;
+      resolve(row ? { wersjaWiersza: row.version, wersjaDanych: row.data.version, region: row.data.player.regionId ?? null, lokacja: row.data.player.locationId ?? null, punkt: row.data.player.spawnPointId ?? null, mapId: row.data.player.mapId ?? null, poz: [row.data.player.x, row.data.player.y], pieniadze: row.data.player.money, stworzenie } : null);
     };
   };
 }));
@@ -797,7 +802,7 @@ try {
   await page.mouse.up();
   const save = await idbSave();
   await shot('w2-zagajnik');
-  w2ok = exit === 'polana-do-zagajnika' && arrived.scena === ZAGAJNIK && arrived.mapa === 'zagajnik' && arrived.lokacja === ZAGAJNIK && arrived.region === REGION && arrived.punkt === 'z-polany' && same(arrived.poz, [2, 9]) && same(arrived.zapisPoz, [2, 9]) && arrived.kierunek === 'right' && arrived.towarzysz && !arrived.przejscie && arrived.odnowienie >= 2 && /Szepczący Zagajnik/.test(arrived.hud ?? '') && same(still, [2, 9]) && save?.lokacja === ZAGAJNIK && save?.wersjaDanych === 2;
+  w2ok = exit === 'polana-do-zagajnika' && arrived.scena === ZAGAJNIK && arrived.mapa === 'zagajnik' && arrived.lokacja === ZAGAJNIK && arrived.region === REGION && arrived.punkt === 'z-polany' && same(arrived.poz, [2, 9]) && same(arrived.zapisPoz, [2, 9]) && arrived.kierunek === 'right' && arrived.towarzysz && !arrived.przejscie && arrived.odnowienie >= 2 && /Szepczący Zagajnik/.test(arrived.hud ?? '') && same(still, [2, 9]) && save?.lokacja === ZAGAJNIK && save?.wersjaDanych === SAVE_V;
   record('W2', 'Przejście A→B joystickiem: Zagajnik, punkt „z-polany” (2,9) twarzą w prawo, towarzysz, HUD, kroki ochronne, zapis od razu w IndexedDB', w2ok, { wyjscie: exit, start, poPrzejsciu: arrived, palecTrzymany900ms: still, zapis: save });
 } catch (e) { fail('W2', 'Przejście A→B', e); }
 
@@ -924,6 +929,14 @@ try {
     p.x = spot.x;
     p.y = spot.y;
     p.money = 4321;
+    // Stworzenia w formacie sprzed Sprintu 4: `ability`, `heldItem`, bez natury i stanu ewolucji.
+    const old = (c) => {
+      const o = { ...c, ability: c.abilityId, heldItem: c.heldItemId };
+      delete o.abilityId; delete o.heldItemId; delete o.nature; delete o.evolutionState;
+      return o;
+    };
+    snap.party = snap.party.map(old);
+    snap.storage = snap.storage.map(old);
     return { ...snap, version: 1 };
   }, spot);
   await page.reload(); // ekran tytułowy — gra nie jest uruchomiona, autozapis nic nie nadpisze
@@ -937,12 +950,291 @@ try {
   await setStepRng('miss');
   const p = await where();
   const money = await S(() => window.__szlaki.stores.useGame.getState().player.money);
+  const lead9 = await S(() => { const c = window.__szlaki.stores.useGame.getState().party[0]; return { nature: c.nature, abilityId: c.abilityId, heldItemId: c.heldItemId, evolutionState: c.evolutionState, stats: c.stats, neutralna: window.__szlaki.creatures.NATURES[c.nature]?.increased === null }; });
   const restored = await controlRestored(); // ruch → autozapis w nowym formacie
   await idle(2800);
   const resaved = await idbSave();
-  const ok = stored?.wersjaDanych === 1 && stored?.mapId === 'polana' && same(stored.poz, [spot.x, spot.y]) && p.region === REGION && p.lokacja === POLANA && p.punkt === 'start' && same(p.zapisPoz, [spot.x, spot.y]) && same(p.poz, [spot.x, spot.y]) && money === 4321 && restored.ruszyl && resaved?.wersjaDanych === 2 && resaved?.wersjaWiersza === 2 && resaved?.lokacja === POLANA && resaved?.mapId === null;
-  record('W9', 'Stary zapis v1 (mapId) z IndexedDB: migracja do v2 — Polana, ta sama pozycja i pieniądze; ponowny zapis już w v2', ok, { pozycjaV1: spot, zapisV1: stored, poWczytaniu: p, pieniadze: money, zapisPoMigracji: resaved, sterowanie: restored });
+  const creatureOk = stored?.stworzenie?.ability && stored.stworzenie.abilityId === null && lead9.abilityId === stored.stworzenie.ability && lead9.neutralna && JSON.stringify(lead9.stats) === JSON.stringify(stored.stworzenie.stats) && lead9.evolutionState?.cancelledAtLevel === null && resaved?.stworzenie?.ability === null && resaved?.stworzenie?.nature === lead9.nature;
+  const ok = stored?.wersjaDanych === 1 && stored?.mapId === 'polana' && same(stored.poz, [spot.x, spot.y]) && p.region === REGION && p.lokacja === POLANA && p.punkt === 'start' && same(p.zapisPoz, [spot.x, spot.y]) && same(p.poz, [spot.x, spot.y]) && money === 4321 && restored.ruszyl && resaved?.wersjaDanych === SAVE_V && resaved?.wersjaWiersza === SAVE_V && resaved?.lokacja === POLANA && resaved?.mapId === null && creatureOk;
+  record('W9', 'Stary zapis v1 (mapId, stworzenia bez natury) z IndexedDB: migracja do v3 — Polana, pozycja, pieniądze; natura neutralna, zdolność zachowana, statystyki bez zmian', ok, { pozycjaV1: spot, zapisV1: stored, poWczytaniu: p, pieniadze: money, prowadzacy: lead9, zapisPoMigracji: resaved, sterowanie: restored });
 } catch (e) { fail('W9', 'Migracja zapisu v1', e); }
+
+
+// ═════════════ Sprint 4: natury, zdolności, przedmioty trzymane, ewolucje ═════════════
+const lead = () => S(() => {
+  const c = window.__szlaki.stores.useGame.getState().party[0];
+  return { uid: c.uid, pokemon: c.pokemon, speciesId: c.speciesId, level: c.level, exp: c.exp, hp: c.hp, maxHp: c.stats.hp, nature: c.nature, abilityId: c.abilityId, heldItemId: c.heldItemId, evolutionState: c.evolutionState, moves: c.moves.map((m) => m.name) };
+});
+const bagCount = (id) => S((id) => window.__szlaki.stores.useGame.getState().bag[id] ?? 0, id);
+const openMenu = async (name) => { await page.locator('.hud-menu button', { hasText: name }).click(); await page.locator('.modal').first().waitFor(); };
+const closeModal = async () => { while (await page.locator('.modal-close').count()) { await page.locator('.modal-close').last().click(); await idle(150); } };
+/** Komunikaty walki (view.message) zbierane od tej chwili. */
+const captureMessages = () => S(() => {
+  window.__msgs = [];
+  if (window.__msgSub) window.__msgSub();
+  window.__msgSub = window.__szlaki.stores.useBattle.subscribe((s, p) => { const m = s.view?.message; if (m && m !== p.view?.message) window.__msgs.push(m); });
+});
+const messages = () => S(() => window.__msgs ?? []);
+const waitChoose = () => page.waitForFunction(() => window.__szlaki.stores.useBattle.getState().phase === 'choose', null, { timeout: 20000 });
+/** Odtwarza zdarzenia tury do kolejnego wyboru (albo końca walki). */
+async function playTurn() {
+  for (let i = 0; i < 400; i++) {
+    const ph = await S(() => window.__szlaki.stores.useBattle.getState().phase);
+    if (ph === 'choose' || ph === 'ended' || ph === 'forcedSwitch') return ph;
+    await S(() => window.__szlaki.stores.useBattle.getState().skip());
+    await idle(40);
+  }
+  return null;
+}
+const patchEnemy = (patch) => S((patch) => {
+  const B = window.__szlaki.stores.useBattle;
+  const engine = structuredClone(B.getState().engine);
+  const e = engine.sides[1].party[0];
+  Object.assign(e, patch.creature ?? {});
+  e.stats = { ...e.stats, ...(patch.stats ?? {}) };
+  B.setState({ engine });
+}, patch);
+let leadBefore = null;
+
+// ───────────── E1. Natura, zdolność i przedmiot w Drużynie; zakładanie z Torby i zdejmowanie ─────────────
+try {
+  await waitJoystick();
+  await S(() => window.__szlaki.stores.useGame.getState().addItem('trail-leftovers', 1));
+  leadBefore = await lead();
+  const bag0 = await bagCount('trail-leftovers');
+  await openMenu('Torba');
+  await page.locator('.modal .card', { hasText: 'Resztki prowiantu' }).getByRole('button', { name: 'Załóż' }).click();
+  await page.locator('.modal .creature-row').first().click();
+  await idle(200);
+  const afterEquip = { held: (await lead()).heldItemId, bag: await bagCount('trail-leftovers') };
+  await closeModal();
+  await openMenu('Drużyna');
+  await page.locator('.modal .creature-row').first().click();
+  await page.getByTestId('creature-nature').waitFor();
+  const natureText = (await page.getByTestId('creature-nature').textContent()) ?? '';
+  const abilityText = (await page.getByTestId('creature-ability').textContent()) ?? '';
+  const heldText = (await page.getByTestId('creature-held').textContent()) ?? '';
+  const nat = await S((id) => window.__szlaki.creatures.NATURES[id], leadBefore.nature);
+  const upText = nat.increased ? ((await page.getByTestId(`stat-${nat.increased}`).textContent()) ?? '') : '';
+  const downText = nat.decreased ? ((await page.getByTestId(`stat-${nat.decreased}`).textContent()) ?? '') : '';
+  await shot('e1-party-detail');
+  await page.getByTestId('creature-held').getByRole('button', { name: 'Zdejmij' }).click();
+  await idle(200);
+  const afterUnequip = { held: (await lead()).heldItemId, bag: await bagCount('trail-leftovers') };
+  await page.getByTestId('creature-held').getByRole('button', { name: 'Załóż' }).click();
+  await page.getByTestId('creature-held').getByRole('button', { name: /Resztki prowiantu/ }).click();
+  await idle(200);
+  const afterReequip = { held: (await lead()).heldItemId, bag: await bagCount('trail-leftovers') };
+  await closeModal();
+  const natureOk = natureText.includes(nat.name) && (nat.increased ? upText.includes('▲') && downText.includes('▼') : natureText.includes('neutralna'));
+  const ok = afterEquip.held === 'trail-leftovers' && afterEquip.bag === bag0 - 1 && natureOk && abilityText.includes('Zdolność') && heldText.includes('Resztki prowiantu') && afterUnequip.held === null && afterUnequip.bag === bag0 && afterReequip.held === 'trail-leftovers' && afterReequip.bag === bag0 - 1;
+  record('E1', 'Drużyna pokazuje naturę (▲/▼ przy statystykach), zdolność i przedmiot; zakładanie z Torby i z Drużyny, zdejmowanie zwraca do torby', ok, { prowadzacy: leadBefore, natura: natureText, zdolnosc: abilityText, przedmiot: heldText, zalozenie: afterEquip, zdjecie: afterUnequip, ponownie: afterReequip });
+} catch (e) { fail('E1', 'Natura, zdolność, przedmiot w Drużynie', e); }
+
+// ───────────── E2. Przedmiot trzymany działa w walce (Resztki prowiantu na koniec tury) ─────────────
+try {
+  await waitJoystick();
+  await S(() => {
+    const G = window.__szlaki.stores.useGame;
+    G.setState((s) => ({ party: s.party.map((c, i) => (i === 0 ? { ...c, hp: Math.max(1, Math.floor(c.stats.hp / 2)), status: null } : c)) }));
+    G.getState().addItem('balm', 1);
+  });
+  await grassEncounter();
+  await waitChoose();
+  await patchEnemy({ stats: { atk: 1, spa: 1 } }); // przeciwnik prawie bez obrażeń — gracz na pewno dotrwa do końca tury
+  const hp0 = await S(() => { const B = window.__szlaki.stores.useBattle.getState(); return B.engine.sides[0].party[B.engine.sides[0].active[0]].hp; });
+  await captureMessages();
+  await S((uid) => window.__szlaki.stores.useBattle.getState().submit({ kind: 'item', item: 'balm', targetUid: uid }), (await lead()).uid);
+  await playTurn();
+  const msgs = await messages();
+  const healEvent = msgs.find((m) => m.includes('Resztki prowiantu'));
+  await shot('e2-leftovers');
+  const outcome = await fleeFast();
+  const ok = !!healEvent && /odzyskuje \d+ PŻ/.test(healEvent) && outcome === 'fled' && (await lead()).heldItemId === 'trail-leftovers';
+  record('E2', 'Przedmiot trzymany w walce: Resztki prowiantu leczą na koniec tury (przedmiot zostaje)', ok, { hpPrzedTura: hp0, komunikat: healEvent ?? null, komunikaty: msgs.slice(-8), wynik: outcome });
+} catch (e) { fail('E2', 'Przedmiot w walce', e); }
+
+// ───────────── E3. Zdolność działa w walce (Ucieczka: pewna ucieczka od dużo szybszego przeciwnika) ─────────────
+try {
+  await waitJoystick();
+  const original = (await lead()).abilityId;
+  await S(() => window.__szlaki.stores.useGame.setState((s) => ({ party: s.party.map((c, i) => (i === 0 ? { ...c, abilityId: 'run-away' } : c)) })));
+  await grassEncounter();
+  await waitChoose();
+  await patchEnemy({ stats: { spe: 999 } });
+  await captureMessages();
+  await page.getByRole('button', { name: 'Ucieczka' }).click();
+  await page.getByRole('button', { name: 'Dalej' }).waitFor({ timeout: 20000 });
+  const outcome = await S(() => window.__szlaki.stores.useBattle.getState().engine.outcome);
+  const escapes = await S(() => window.__szlaki.stores.useBattle.getState().engine.escapeAttempts);
+  const msgs = await messages();
+  await page.getByRole('button', { name: 'Dalej' }).click();
+  await afterBattleBackOnMap();
+  await S((ab) => window.__szlaki.stores.useGame.setState((s) => ({ party: s.party.map((c, i) => (i === 0 ? { ...c, abilityId: ab } : c)) })), original);
+  const ok = outcome === 'fled' && escapes === 1 && msgs.some((m) => m.includes('Ucieczka'));
+  record('E3', 'Zdolność w walce: „Ucieczka” — pierwsza próba ucieczki od przeciwnika o szybkości 999 się udaje', ok, { wynik: outcome, proby: escapes, komunikaty: msgs });
+} catch (e) { fail('E3', 'Zdolność w walce', e); }
+
+// ───────────── E4. Ewolucja przez poziom od początku do końca (prawdziwe dane PokéAPI): anulowanie, potem ewolucja ─────────────
+let e4 = null;
+try {
+  await waitJoystick();
+  const before = await lead();
+  const info = await S(async () => {
+    const c = window.__szlaki.stores.useGame.getState().party[0];
+    const i = await window.__szlaki.creatures.evolutionInfo(c);
+    return i.checks.map((x) => ({ to: x.option.to, method: x.option.method, status: x.status, minLevel: x.option.minLevel }));
+  });
+  const target = info.find((x) => x.method === 'LEVEL');
+  if (!target) throw new Error('prowadzący nie ma ewolucji przez poziom: ' + JSON.stringify(info));
+  const L = target.minLevel;
+  // Scenariusz: poziom tuż przed progiem, brakuje 1 pkt doświadczenia.
+  await S(async ({ L }) => {
+    const G = window.__szlaki.stores.useGame;
+    const c = G.getState().party[0];
+    const table = await window.__szlaki.creatures.getGrowth(c.growthRate);
+    G.setState((s) => ({ party: s.party.map((x, i) => (i === 0 ? { ...x, level: L - 1, exp: table[L] - 1, hp: x.stats.hp, status: null, evolutionState: { cancelledAtLevel: null, evolvedFrom: null } } : x)) }));
+  }, { L });
+  await grassEncounter();
+  await waitChoose();
+  await patchEnemy({ creature: { hp: 1 } });
+  if (!(await fightToEnd(false))) throw new Error('walka nie dobiegła końca');
+  await page.getByRole('button', { name: 'Dalej' }).click();
+  await closeDialogs();
+  await page.getByTestId('evolution-modal').waitFor({ timeout: 30000 });
+  const modalText = (await page.getByTestId('evolution-modal').textContent()) ?? '';
+  await shot('e4-evolution-modal');
+  const atLevel = await lead();
+  // 1) Anulowanie.
+  await page.getByTestId('evolution-modal').getByRole('button', { name: 'Przerwij' }).click();
+  await idle(300);
+  const afterCancel = await lead();
+  const modalGone = (await page.getByTestId('evolution-modal').count()) === 0;
+  await closeDialogs();
+  await waitJoystick();
+  // 2) Drużyna: warunek spełniony + „Ewoluuj”.
+  await openMenu('Drużyna');
+  await page.locator('.modal .creature-row').first().click();
+  await page.getByTestId('creature-evolution').waitFor({ timeout: 20000 });
+  const evoText = (await page.getByTestId('creature-evolution').textContent()) ?? '';
+  await page.getByTestId('creature-evolution').getByRole('button', { name: 'Ewoluuj' }).first().click();
+  await page.getByTestId('evolution-modal').waitFor({ timeout: 20000 });
+  const followerBefore = await S(() => window.__szlaki.game.scene.getScene('Overworld').followerKey);
+  await page.getByTestId('evolution-modal').getByRole('button', { name: 'Ewoluuj' }).click();
+  await page.locator('.dialog').waitFor({ timeout: 20000 });
+  const dialogText = (await page.locator('.dialog').textContent()) ?? '';
+  await closeDialogs();
+  await closeModal();
+  await waitJoystick();
+  await idle(800);
+  const after = await lead();
+  const dex = await S((id) => window.__szlaki.stores.useGame.getState().dex[String(id)] ?? null, after.speciesId);
+  const followerAfter = await S(() => window.__szlaki.game.scene.getScene('Overworld').followerKey);
+  await shot('e4-evolved');
+  e4 = after;
+  const ok =
+    atLevel.level === L && modalText.includes('Ewoluuj') && afterCancel.pokemon === before.pokemon && afterCancel.evolutionState?.cancelledAtLevel === L && modalGone &&
+    evoText.includes('warunek spełniony') && /Gratulacje/.test(dialogText) &&
+    after.pokemon !== before.pokemon && after.speciesId !== before.speciesId && after.level === L && after.exp === atLevel.exp && JSON.stringify(after.moves) === JSON.stringify(atLevel.moves) &&
+    after.nature === before.nature && after.heldItemId === atLevel.heldItemId && after.evolutionState?.evolvedFrom === before.pokemon && dex?.caught === true && followerAfter.includes(`|${after.pokemon}|`) && followerAfter !== followerBefore;
+  record('E4', 'Ewolucja przez poziom: awans w walce → okno; „Przerwij” zostawia gatunek; z Drużyny „Ewoluuj” → nowy gatunek, poziom, EXP, ruchy, natura i przedmiot bez zmian, Atlas, towarzysz', ok, { cel: target, przed: before, naPoziomie: atLevel, poAnulowaniu: afterCancel, druzyna: evoText, dialog: dialogText, po: after, atlas: dex, towarzysz: [followerBefore, followerAfter] });
+} catch (e) { fail('E4', 'Ewolucja przez poziom', e); }
+
+// ───────────── E5. Ewolucja kamieniem z Torby (Eevee + Kamień przypływu): anulowanie nie zużywa kamienia ─────────────
+try {
+  await waitJoystick();
+  const eevee = await S(async () => {
+    const C = window.__szlaki.creatures;
+    const G = window.__szlaki.stores.useGame;
+    if (G.getState().party.length >= 6) G.getState().moveToStorage(G.getState().party.length - 1);
+    const { creature } = await C.buildStarter('eevee', 10, C.rng);
+    G.getState().addCreature(creature);
+    G.getState().addItem('stone-water', 1);
+    return creature.uid;
+  });
+  const findC = () => S((uid) => { const c = window.__szlaki.stores.useGame.getState().party.find((x) => x.uid === uid); return c ? { pokemon: c.pokemon, level: c.level, exp: c.exp, moves: c.moves.map((m) => m.name), types: c.types } : null; }, eevee);
+  const before = await findC();
+  const useStone = async () => {
+    await openMenu('Torba');
+    await page.locator('.modal .card', { hasText: 'Kamień przypływu' }).getByRole('button', { name: 'Użyj' }).click();
+    await page.locator('.modal', { hasText: 'Może ewoluować w: vaporeon' }).waitFor({ timeout: 30000 });
+    const rows = page.locator('.modal .creature-row');
+    const n = await rows.count();
+    let clicked = false;
+    for (let i = 0; i < n && !clicked; i++) {
+      if (!(await rows.nth(i).isDisabled())) { await rows.nth(i).click(); clicked = true; }
+    }
+    if (!clicked) throw new Error('żadne stworzenie nie może użyć kamienia');
+    await page.getByTestId('evolution-modal').waitFor({ timeout: 20000 });
+  };
+  await useStone();
+  await page.getByTestId('evolution-modal').getByRole('button', { name: 'Przerwij' }).click();
+  await idle(300);
+  const afterCancel = { c: await findC(), stone: await bagCount('stone-water') };
+  await closeModal();
+  await useStone();
+  await page.getByTestId('evolution-modal').getByRole('button', { name: 'Ewoluuj' }).click();
+  await page.locator('.dialog').waitFor({ timeout: 20000 });
+  await closeDialogs();
+  await closeModal();
+  await waitJoystick();
+  const after = await findC();
+  const stone = await bagCount('stone-water');
+  const dex = await S(() => window.__szlaki.stores.useGame.getState().dex['134'] ?? null);
+  await shot('e5-vaporeon');
+  const ok = before?.pokemon === 'eevee' && afterCancel.c?.pokemon === 'eevee' && afterCancel.stone === 1 && after?.pokemon === 'vaporeon' && after.types.includes('water') && after.level === 10 && after.exp === before.exp && JSON.stringify(after.moves) === JSON.stringify(before.moves) && stone === 0 && dex?.caught === true;
+  record('E5', 'Ewolucja kamieniem z Torby: Eevee → Vaporeon; „Przerwij” nie zużywa kamienia, potwierdzenie zużywa; poziom, EXP i ruchy zostają', ok, { przed: before, poAnulowaniu: afterCancel, po: after, kamien: stone, atlas: dex });
+} catch (e) { fail('E5', 'Ewolucja kamieniem', e); }
+
+// ───────────── E6. Zapis i wczytanie nowych pól (natura, zdolność, przedmiot, stan ewolucji) ─────────────
+try {
+  await waitJoystick();
+  await setStepRng('miss');
+  await controlRestored(); // ruch → autozapis
+  await idle(2800);
+  const party = () => S(() => window.__szlaki.stores.useGame.getState().party.map((c) => ({ uid: c.uid, pokemon: c.pokemon, nature: c.nature, abilityId: c.abilityId, heldItemId: c.heldItemId, evolutionState: c.evolutionState, stats: c.stats })));
+  const before = await party();
+  const row = await idbSave();
+  await page.reload();
+  await page.getByRole('button', { name: /Kontynuuj/ }).click({ timeout: 15000 });
+  await waitJoystick();
+  await page.waitForFunction(() => !!window.__szlaki?.game?.scene?.getScene('Overworld')?.follower, null, { timeout: 20000 });
+  await setStepRng('miss');
+  const after = await party();
+  const ok = row?.wersjaDanych === SAVE_V && JSON.stringify(after) === JSON.stringify(before) && before.some((c) => c.evolutionState?.evolvedFrom) && before.some((c) => c.heldItemId);
+  record('E6', 'Zapis v3 w IndexedDB i ponowne wczytanie: natura, zdolność, przedmiot i stan ewolucji bez zmian', ok, { wersja: row?.wersjaDanych, przed: before, po: after });
+} catch (e) { fail('E6', 'Zapis i wczytanie', e); }
+
+// ───────────── E7. Zgodność starego zapisu v2 (stworzenia bez natury, pola ability/heldItem) ─────────────
+try {
+  await waitJoystick();
+  const v2 = await S(() => {
+    const snap = structuredClone(window.__szlaki.stores.useGame.getState().snapshot());
+    const old = (c) => {
+      const o = { ...c, ability: c.abilityId, heldItem: c.heldItemId };
+      delete o.abilityId; delete o.heldItemId; delete o.nature; delete o.evolutionState;
+      return o;
+    };
+    snap.party = snap.party.map(old);
+    snap.storage = snap.storage.map(old);
+    return { ...snap, version: 2 };
+  });
+  await page.reload();
+  await page.getByRole('button', { name: /Kontynuuj/ }).waitFor({ timeout: 15000 });
+  await idbPut({ id: 'slot1', data: v2, version: 2, updatedAt: Date.now() });
+  const stored = await idbSave();
+  await page.reload();
+  await page.getByRole('button', { name: /Kontynuuj/ }).click({ timeout: 15000 });
+  await waitJoystick();
+  await setStepRng('miss');
+  const after = await S(() => window.__szlaki.stores.useGame.getState().party.map((c) => ({ pokemon: c.pokemon, nature: c.nature, neutralna: window.__szlaki.creatures.NATURES[c.nature]?.increased === null, abilityId: c.abilityId, heldItemId: c.heldItemId, evolutionState: c.evolutionState, stats: c.stats })));
+  const restored = await controlRestored();
+  await idle(2800);
+  const resaved = await idbSave();
+  const src = v2.party;
+  const ok = stored?.wersjaDanych === 2 && after.length === src.length && after.every((c, i) => c.pokemon === src[i].pokemon && c.neutralna && c.abilityId === src[i].ability && c.heldItemId === src[i].heldItem && JSON.stringify(c.stats) === JSON.stringify(src[i].stats) && c.evolutionState && c.evolutionState.cancelledAtLevel === null) && restored.ruszyl && resaved?.wersjaDanych === SAVE_V && resaved?.stworzenie?.ability === null && resaved?.stworzenie?.nature;
+  record('E7', 'Stary zapis v2 z IndexedDB: stworzenia dostają naturę neutralną, zdolność i przedmiot zachowane, statystyki bez zmian; ponowny zapis w v3', ok, { zapisV2: stored, poWczytaniu: after, zapisPo: resaved, sterowanie: restored });
+} catch (e) { fail('E7', 'Zgodność zapisu v2', e); }
 
 // ───────────── U1. Wersja i ręczne sprawdzenie aktualizacji (Menu) ─────────────
 try {

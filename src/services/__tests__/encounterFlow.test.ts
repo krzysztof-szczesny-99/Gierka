@@ -14,7 +14,7 @@ import { TEST_MAP } from '../../game/maps/testMap';
 import { getLocation, spawnPointOf } from '../../game/world';
 import { useBattle } from '../../state/battleStore';
 import { useGame } from '../../state/gameStore';
-import { isOverworldBlocked, useUi } from '../../state/uiStore';
+import { isOverworldBlocked, useUi, type EvolutionRequest } from '../../state/uiStore';
 import type { WildSpawn } from '../creatureService';
 import { cancelEncounter, configureEncounterDeps, finishBattle, startWildEncounter } from '../encounterService';
 import type { StepEncounterSource } from '../../game/eventBus';
@@ -41,12 +41,16 @@ let restoreDeps: () => void = () => undefined;
 let battleEnds: BusEvents['battle-end'][] = [];
 let travels: BusEvents['travel'][] = [];
 let offs: (() => void)[] = [];
+let evolutionCalls: { party: string[]; leveled: string[] }[] = [];
+let evolutionAnswer: (leveled: string[]) => EvolutionRequest[] = () => [];
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 beforeEach(() => {
   now = 10_000;
   saves = 0;
+  evolutionCalls = [];
+  evolutionAnswer = () => [];
   moveDelayMs = 0;
   failTypeChart = false;
   restoreDeps = configureEncounterDeps({
@@ -77,6 +81,10 @@ beforeEach(() => {
     rng: createRng(123),
     now: () => now,
     minTransitionMs: 0,
+    collectEvolutions: async (party, leveled) => {
+      evolutionCalls.push({ party: party.map((c) => c.uid), leveled: [...leveled] });
+      return evolutionAnswer(leveled);
+    },
   });
 
   useGame.getState().resetGame();
@@ -89,6 +97,7 @@ beforeEach(() => {
     toast: null,
     transition: false,
     learnQueue: [],
+    evolutionQueue: [],
     gameMode: 'EXPLORATION',
     activeEncounterId: null,
     sourceEntityId: null,
@@ -449,5 +458,43 @@ describe('spotkanie specjalne (Sprint 2)', () => {
       await finishBattle();
       expect(!!useGame.getState().flags[staticDoneFlag('gaj-straznik')]).toBe(expected);
     }
+  });
+});
+
+describe('ewolucja po walce (Sprint 4)', () => {
+  it('awans w walce → propozycja ewolucji w kolejce; ruch po mapie zablokowany, dopóki okno jest otwarte', async () => {
+    evolutionAnswer = (leveled) => leveled.map((uid) => ({ uid, toSpecies: 'flamier', toSpeciesId: 2, method: 'LEVEL' as const, itemId: null, condition: 'poziom 13' }));
+    await startBattle();
+    setOutcome('win', (party) => {
+      party[0].level += 1;
+    });
+    await finishBattle();
+    await delay(0);
+    expect(evolutionCalls).toEqual([{ party: [hero.creature.uid], leveled: [hero.creature.uid] }]);
+    expect(useUi.getState().evolutionQueue).toHaveLength(1);
+    closeDialogs();
+    expect(isOverworldBlocked()).toBe(true);
+    useUi.getState().shiftEvolution();
+    expect(isOverworldBlocked()).toBe(false);
+  });
+
+  it('bez awansu albo po przegranej — brak propozycji', async () => {
+    evolutionAnswer = (leveled) => leveled.map((uid) => ({ uid, toSpecies: 'flamier', toSpeciesId: 2, method: 'LEVEL' as const, itemId: null, condition: 'poziom 13' }));
+    await startBattle();
+    setOutcome('win');
+    await finishBattle();
+    await delay(0);
+    expect(evolutionCalls).toEqual([]);
+    closeDialogs();
+    useUi.setState({ encounterCooldown: 0 }); // odnowienie po pierwszej walce minęło
+    await startBattle('wild-1');
+    setOutcome('lose', (party) => {
+      party[0].level += 1;
+      party[0].hp = 0;
+    });
+    await finishBattle();
+    await delay(0);
+    expect(evolutionCalls).toEqual([]);
+    expect(useUi.getState().evolutionQueue).toHaveLength(0);
   });
 });

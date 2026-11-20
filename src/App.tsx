@@ -3,6 +3,7 @@ import { bootApp } from './services/bootService';
 import { useUi } from './state/uiStore';
 import { DialogBox, ErrorBoundary, Toast, TransitionOverlay } from './ui/components/Overlays';
 import { GemLogo } from './ui/components/common';
+import { EvolutionModal } from './ui/menus/EvolutionModal';
 import { LearnMoveModal } from './ui/menus/LearnMoveModal';
 import { ModalHost } from './ui/menus/ModalHost';
 import { BattleScreen } from './ui/screens/BattleScreen';
@@ -34,6 +35,7 @@ export default function App() {
         {mode === 'battle' && <BattleScreen />}
         <ModalHost />
         <LearnMoveModal />
+        <EvolutionModal />
         <DialogBox />
         <TransitionOverlay />
         <Toast />

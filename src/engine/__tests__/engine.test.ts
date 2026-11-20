@@ -160,7 +160,10 @@ describe('walka', () => {
     const { rng, state } = setup(9);
     const r = resolveTurn(state, { kind: 'move', moveIndex: 3 }, rng); // swords-dance
     const lead = getActive(r.state, 0)!;
-    expect(r.state.boosts[lead.uid].atk).toBe(2);
+    // Taniec mieczy: +2 do ataku; przeciwnik w tej samej turze może użyć Growl (−1) — liczymy wszystkie zmiany.
+    const atk = r.events.filter((e): e is Extract<typeof e, { t: 'boost' }> => e.t === 'boost' && e.uid === lead.uid && e.stat === 'atk');
+    expect(atk.some((e) => e.change === 2)).toBe(true);
+    expect(r.state.boosts[lead.uid].atk).toBe(atk.reduce((sum, e) => sum + e.change, 0));
   });
 
   it('łapanie przy captureRate 255 i niskim HP kończy walkę', () => {

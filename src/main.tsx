@@ -2,12 +2,16 @@ import { createRoot } from 'react-dom/client';
 import { registerSW } from 'virtual:pwa-register';
 import App from './App';
 import { DEBUG, debugSeed, expose } from './debug';
+import { NATURES } from './config/natures';
 import { WORLD } from './config/world';
+import { getGrowth } from './data/repository';
 import { createRng, createSequenceRng, gameRng, rngFromNext } from './engine/rng';
 import { bus } from './game/eventBus';
 import { installInputGuards, joystick, virtualInput } from './game/input';
 import { validateWorld } from './game/world';
+import { buildStarter } from './services/creatureService';
 import { configureEncounterDeps } from './services/encounterService';
+import { evolutionInfo, levelEvolutionFor } from './services/evolutionService';
 import { checkForUpdate, installUpdateChecks, setUpdateRegistration } from './services/updateService';
 import { useBattle } from './state/battleStore';
 import { useGame } from './state/gameStore';
@@ -22,6 +26,8 @@ expose('stores', { useGame, useUi, useBattle, bus });
 expose('input', { joystick, virtualInput });
 expose('update', { checkForUpdate });
 expose('world', { WORLD, validateWorld });
+// Scenariusze E2E (tylko ?debug): budowanie stworzenia z danych PokéAPI i stan ewolucji.
+expose('creatures', { buildStarter, evolutionInfo, levelEvolutionFor, getGrowth, NATURES, rng: gameRng });
 
 // Tryb diagnostyczny: spójność danych świata (błędy trafiają do konsoli — test E2E je wykrywa).
 if (DEBUG) {

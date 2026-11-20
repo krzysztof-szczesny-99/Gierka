@@ -1,4 +1,7 @@
 import { useEffect, useState } from 'react';
+import { abilityDef } from '../../config/abilities';
+import { HELD_ITEM_IDS, ITEMS, isHeldItemId } from '../../config/items';
+import { NATURES } from '../../config/natures';
 import { RULES } from '../../config/rules';
 import { STAT_LABEL, TYPE_COLOR, prettySlug, typeLabel } from '../../config/text';
 import { getGrowth } from '../../data/repository';
@@ -6,6 +9,7 @@ import { displayName } from '../../engine/creature';
 import { expForLevel, expProgress } from '../../engine/experience';
 import { STAT_KEYS, type Creature, type GrowthTable } from '../../engine/types';
 import { loadMovesSafe } from '../../services/creatureService';
+import { evolutionInfo, itemEvolutionFor, levelEvolutionFor, type EvolutionInfo } from '../../services/evolutionService';
 import { useGame } from '../../state/gameStore';
 import { useUi } from '../../state/uiStore';
 import { ExpBar, GenderMark, HpBar, Modal, StatusBadge, TypeBadges, usePokemonData } from '../components/common';
@@ -90,6 +94,7 @@ function CreatureDetail({ c, index, where }: { c: Creature; index: number; where
   }, [c.growthRate, c.moves]);
 
   const toast = (t: string) => useUi.getState().showToast(t);
+  const nature = NATURES[c.nature];
   return (
     <div className="detail">
       {growth && (
@@ -104,12 +109,20 @@ function CreatureDetail({ c, index, where }: { c: Creature; index: number; where
         </div>
       )}
       <div className="stat-grid">
-        {STAT_KEYS.map((k) => (
-          <div key={k}>
-            <span className="muted">{STAT_LABEL[k]}</span>
-            <b>{c.stats[k]}</b>
-          </div>
-        ))}
+        {STAT_KEYS.map((k) => {
+          const up = nature?.increased === k;
+          const down = nature?.decreased === k;
+          return (
+            <div key={k} data-testid={`stat-${k}`}>
+              <span className="muted">
+                {STAT_LABEL[k]}
+                {up && <span className="nature-up"> ▲</span>}
+                {down && <span className="nature-down"> ▼</span>}
+              </span>
+              <b>{c.stats[k]}</b>
+            </div>
+          );
+        })}
       </div>
       <div className="move-list">
         {c.moves.map((m) => {
@@ -124,9 +137,22 @@ function CreatureDetail({ c, index, where }: { c: Creature; index: number; where
           );
         })}
       </div>
-      <div className="small muted">
-        Zdolność: {prettySlug(c.ability)} (działanie w kolejnym etapie) · Spotkany: {c.metAt}, poz. {c.metLevel}
-        {c.mighty ? ' · Potężny okaz' : ''}
+      <div className="stack small" style={{ gap: 4 }}>
+        <div data-testid="creature-nature">
+          <span className="muted">Natura:</span> <b>{nature?.name ?? c.nature}</b>{' '}
+          <span className="muted">
+            {nature?.increased && nature.decreased
+              ? `(+10% ${STAT_LABEL[nature.increased]}, −10% ${STAT_LABEL[nature.decreased]})`
+              : '(neutralna)'}
+          </span>
+        </div>
+        <AbilityLine abilityId={c.abilityId} />
+        <HeldItemLine c={c} />
+        <EvolutionSection c={c} />
+        <div className="muted">
+          Spotkany: {c.metAt}, poz. {c.metLevel}
+          {c.mighty ? ' · Potężny okaz' : ''}
+        </div>
       </div>
       <div className="row" style={{ flexWrap: 'wrap' }}>
         {where === 'party' && index > 0 && (
@@ -151,6 +177,151 @@ function CreatureDetail({ c, index, where }: { c: Creature; index: number; where
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+function AbilityLine({ abilityId }: { abilityId: string }) {
+  const def = abilityDef(abilityId);
+  return (
+    <div data-testid="creature-ability">
+      <span className="muted">Zdolność:</span>{' '}
+      {def ? (
+        <>
+          <b>{def.name}</b> <span className="muted">— {def.description}</span>
+        </>
+      ) : (
+        <>
+          <b>{prettySlug(abilityId)}</b> <span className="muted">(jeszcze nie działa w grze)</span>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Przedmiot trzymany: założenie z torby (1 sztuka) i zdjęcie (wraca do torby). */
+function HeldItemLine({ c }: { c: Creature }) {
+  const bag = useGame((s) => s.bag);
+  const [picking, setPicking] = useState(false);
+  const held = isHeldItemId(c.heldItemId) ? ITEMS[c.heldItemId] : null;
+  const available = HELD_ITEM_IDS.filter((id) => (bag[id] ?? 0) > 0);
+  const toast = (t: string) => useUi.getState().showToast(t);
+  return (
+    <div className="stack" style={{ gap: 4 }} data-testid="creature-held">
+      <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+        <span className="muted">Przedmiot:</span>
+        {held ? <b>{held.name}</b> : <span>brak</span>}
+        {held && (
+          <button
+            className="btn btn-small"
+            onClick={() => {
+              if (useGame.getState().unequipItem(c.uid)) toast(`${held.name} wraca do torby.`);
+            }}
+          >
+            Zdejmij
+          </button>
+        )}
+        <button className="btn btn-small" onClick={() => setPicking(!picking)} disabled={!available.length && !picking}>
+          {held ? 'Zmień' : 'Załóż'}
+        </button>
+      </div>
+      {held && <div className="muted">{held.description}</div>}
+      {picking && (
+        <div className="stack" style={{ gap: 4 }}>
+          {available.length === 0 && <div className="muted">Brak przedmiotów do trzymania w torbie (kupisz je w Kramie).</div>}
+          {available.map((id) => (
+            <button
+              key={id}
+              className="btn btn-small btn-block"
+              style={{ justifyContent: 'space-between' }}
+              onClick={() => {
+                const err = useGame.getState().equipItem(c.uid, id);
+                toast(err ?? `${displayName(c)} trzyma: ${ITEMS[id].name}.`);
+                setPicking(false);
+              }}
+            >
+              <span>{ITEMS[id].name}</span>
+              <span className="muted">×{bag[id]}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Drogi ewolucji i stan warunków (dane z bufora — pobierane raz, przy rozwinięciu szczegółów). */
+function EvolutionSection({ c }: { c: Creature }) {
+  const bag = useGame((s) => s.bag);
+  const [info, setInfo] = useState<EvolutionInfo | null>(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    setError(false);
+    evolutionInfo(c)
+      .then((i) => alive && setInfo(i))
+      .catch(() => alive && setError(true));
+    return () => {
+      alive = false;
+    };
+  }, [c]);
+
+  const offerLevel = async () => {
+    const req = await levelEvolutionFor(c, true).catch(() => null);
+    if (req) useUi.getState().pushEvolutions([req]);
+    else useUi.getState().showToast('Warunek ewolucji nie jest spełniony.');
+  };
+  const offerItem = async (itemId: Parameters<typeof itemEvolutionFor>[1]) => {
+    const req = await itemEvolutionFor(c, itemId).catch(() => null);
+    if (req) useUi.getState().pushEvolutions([req]);
+  };
+
+  if (error) return <div className="muted">Ewolucja: brak danych (połącz się z siecią, aby je pobrać).</div>;
+  if (!info) return <div className="muted">Ewolucja: wczytywanie…</div>;
+  if (!info.checks.length) return <div className="muted" data-testid="creature-evolution">Ewolucja: brak dalszych ewolucji.</div>;
+  return (
+    <div className="stack" style={{ gap: 4 }} data-testid="creature-evolution">
+      {info.checks.map((x, i) => {
+        const target = prettySlug(x.option.to);
+        if (x.status === 'READY')
+          return (
+            <div key={i} className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+              <span>
+                Ewolucja → <b>{target}</b>: {x.condition} <span className="nature-up">✓ warunek spełniony</span>
+              </span>
+              <button className="btn btn-small btn-primary" onClick={() => void offerLevel()}>
+                Ewoluuj
+              </button>
+            </div>
+          );
+        if (x.status === 'WAITING')
+          return (
+            <div key={i}>
+              Ewolucja → <b>{target}</b>: {x.condition} <span className="muted">(brakuje {(x.option.minLevel ?? 0) - c.level} poz.)</span>
+            </div>
+          );
+        if (x.status === 'NEEDS_ITEM' && x.itemId) {
+          const have = bag[x.itemId] ?? 0;
+          return (
+            <div key={i} className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+              <span>
+                Ewolucja → <b>{target}</b>: przedmiot {ITEMS[x.itemId].name} <span className="muted">(masz: {have})</span>
+              </span>
+              {have > 0 && (
+                <button className="btn btn-small btn-primary" onClick={() => void offerItem(x.itemId!)}>
+                  Użyj kamienia
+                </button>
+              )}
+            </div>
+          );
+        }
+        return (
+          <div key={i} className="muted">
+            Ewolucja → <b>{target}</b>: {x.condition} (NOT_IMPLEMENTED)
+          </div>
+        );
+      })}
     </div>
   );
 }

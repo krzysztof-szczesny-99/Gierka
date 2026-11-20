@@ -1,7 +1,12 @@
 // Migracje zapisów gry między wersjami formatu (czyste funkcje — testowane jednostkowo).
 // v1 → v2 (Sprint 3): `player.mapId` zastąpione położeniem w modelu świata (regionId, locationId, spawnPointId);
 // pozycja x/y zostaje zachowana jako bezpieczny punkt wejścia (sprawdzany przy wczytaniu przez resolveSafeEntry).
+// v2 → v3 (Sprint 4): stworzenia dostają `nature`, `abilityId` (dawniej `ability`), `heldItemId` (dawniej
+// `heldItem`) i `evolutionState`. Natura starych stworzeń jest neutralna (stała, wyliczona z uid), więc ich
+// zapisane statystyki się nie zmieniają.
 
+import { HELD_ITEM_IDS } from '../config/items';
+import { isNatureId, neutralNatureFor } from '../config/natures';
 import { DEFAULT_SPAWN_POINT_ID } from '../config/world';
 import { getLocation, locationForMap, startLocation } from '../game/world';
 import { SAVE_VERSION, type GameData, type PlayerState } from '../state/gameStore';
@@ -24,8 +29,35 @@ function v1ToV2(data: AnyRecord): AnyRecord {
   return { ...data, player, version: 2 };
 }
 
+/** Uzupełnia pola stworzenia wprowadzone w v3 (idempotentne — bezpieczne także dla danych już w v3). */
+export function upgradeCreatureV3(raw: unknown): unknown {
+  if (!isRecord(raw)) return raw;
+  const c: AnyRecord = { ...raw };
+  const uid = typeof c.uid === 'string' ? c.uid : '';
+  c.nature = isNatureId(c.nature) ? c.nature : neutralNatureFor(uid);
+  const ability = typeof c.abilityId === 'string' ? c.abilityId : typeof c.ability === 'string' ? c.ability : 'brak';
+  c.abilityId = ability;
+  delete c.ability;
+  const held = c.heldItemId !== undefined ? c.heldItemId : c.heldItem;
+  c.heldItemId = typeof held === 'string' && (HELD_ITEM_IDS as readonly string[]).includes(held) ? held : null;
+  delete c.heldItem;
+  const evo = isRecord(c.evolutionState) ? c.evolutionState : {};
+  c.evolutionState = {
+    cancelledAtLevel: typeof evo.cancelledAtLevel === 'number' ? evo.cancelledAtLevel : null,
+    evolvedFrom: typeof evo.evolvedFrom === 'string' ? evo.evolvedFrom : null,
+  };
+  return c;
+}
+
+/** v2 → v3: nowe pola stworzeń w drużynie i magazynie. */
+function v2ToV3(data: AnyRecord): AnyRecord {
+  const list = (v: unknown) => (Array.isArray(v) ? v.map(upgradeCreatureV3) : []);
+  return { ...data, party: list(data.party), storage: list(data.storage), version: 3 };
+}
+
 const STEPS: Record<number, (d: AnyRecord) => AnyRecord> = {
   1: v1ToV2,
+  2: v2ToV3,
 };
 
 /** Doprowadza dowolny obsługiwany zapis do bieżącej wersji (SAVE_VERSION). */
@@ -40,7 +72,10 @@ export function migrateSave(raw: unknown): GameData {
     data = step(data);
     version = data.version as number;
   }
-  // Zapis v2 z niepełnym położeniem (np. ręcznie edytowany) — uzupełnienie lokacją startową.
+  // Stworzenia zawsze z kompletem pól v3 (idempotentne — np. dla ręcznie edytowanego zapisu).
+  data.party = Array.isArray(data.party) ? data.party.map(upgradeCreatureV3) : [];
+  data.storage = Array.isArray(data.storage) ? data.storage.map(upgradeCreatureV3) : [];
+  // Zapis z niepełnym położeniem (np. ręcznie edytowany) — uzupełnienie lokacją startową.
   const player = (isRecord(data.player) ? data.player : {}) as Partial<PlayerState>;
   if (!getLocation(player.locationId)) {
     const loc = startLocation();

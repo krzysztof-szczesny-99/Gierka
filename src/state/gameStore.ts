@@ -1,7 +1,7 @@
 // Trwały stan gry (zapisywany w IndexedDB): gracz, drużyna, magazyn, torba, Atlas, zadania, ustawienia.
 
 import { create } from 'zustand';
-import { ITEMS, STARTING_BAG, STARTING_MONEY, type ItemId } from '../config/items';
+import { isHeldItemId, ITEMS, STARTING_BAG, STARTING_MONEY, type ItemId } from '../config/items';
 import { QUESTS } from '../config/quests';
 import { RULES } from '../config/rules';
 import { getLocation, startPosition, type WorldPosition } from '../game/world';
@@ -10,9 +10,10 @@ import type { Creature, Dir, MoveData, TypeName } from '../engine/types';
 
 /**
  * Wersja formatu zapisu. 2 (Sprint 3): położenie w modelu świata (regionId, locationId, spawnPointId)
- * zamiast `mapId`; migracja zapisów v1 — src/data/migrations.ts.
+ * zamiast `mapId`. 3 (Sprint 4): stworzenia z naturą, abilityId, heldItemId i evolutionState.
+ * Migracje starszych zapisów — src/data/migrations.ts.
  */
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 export interface PlayerState {
   name: string;
@@ -128,6 +129,15 @@ export interface GameStore extends GameData {
   updateSettings(p: Partial<Settings>): void;
   learnMove(uid: string, move: MoveData, replaceIndex: number | null): void;
   useFieldItem(id: ItemId, uid: string): string | null;
+  /**
+   * Założenie przedmiotu trzymanego: 1 sztuka z torby trafia do stworzenia (poprzedni przedmiot wraca
+   * do torby). Zwraca komunikat błędu albo null przy powodzeniu.
+   */
+  equipItem(uid: string, id: ItemId): string | null;
+  /** Zdjęcie przedmiotu — wraca do torby. */
+  unequipItem(uid: string): boolean;
+  /** Anulowana ewolucja przez poziom (nie proponujemy jej ponownie przed kolejnym awansem). */
+  setEvolutionCancelled(uid: string, level: number): void;
 }
 
 const DATA_KEYS: (keyof GameData)[] = [
@@ -338,7 +348,44 @@ export const useGame = create<GameStore>()((set, get) => ({
     }));
     return text;
   },
+
+  equipItem: (uid, id) => {
+    const s = get();
+    const c = findOwned(s, uid);
+    if (!c) return 'Nie znaleziono stworzenia.';
+    if (!isHeldItemId(id)) return 'Tego przedmiotu nie można trzymać.';
+    if ((s.bag[id] ?? 0) <= 0) return 'Nie masz tego przedmiotu w torbie.';
+    if (c.heldItemId === id) return `${displayName(c)} już trzyma: ${ITEMS[id].name}.`;
+    const bag = { ...s.bag, [id]: (s.bag[id] ?? 0) - 1 };
+    const prev = c.heldItemId;
+    if (isHeldItemId(prev)) bag[prev] = (bag[prev] ?? 0) + 1;
+    const map = new Map([[uid, { ...c, heldItemId: id }]]);
+    set({ bag, party: replaceByUid(s.party, map), storage: replaceByUid(s.storage, map) });
+    return null;
+  },
+
+  unequipItem: (uid) => {
+    const s = get();
+    const c = findOwned(s, uid);
+    if (!c || !c.heldItemId) return false;
+    const prev = c.heldItemId;
+    const bag = isHeldItemId(prev) ? { ...s.bag, [prev]: (s.bag[prev] ?? 0) + 1 } : s.bag;
+    const map = new Map([[uid, { ...c, heldItemId: null }]]);
+    set({ bag, party: replaceByUid(s.party, map), storage: replaceByUid(s.storage, map) });
+    return true;
+  },
+
+  setEvolutionCancelled: (uid, level) => {
+    const c = findOwned(get(), uid);
+    if (!c) return;
+    const map = new Map([[uid, { ...c, evolutionState: { ...c.evolutionState, cancelledAtLevel: level } }]]);
+    set((s) => ({ party: replaceByUid(s.party, map), storage: replaceByUid(s.storage, map) }));
+  },
 }));
+
+function findOwned(s: GameData, uid: string): Creature | undefined {
+  return s.party.find((c) => c.uid === uid) ?? s.storage.find((c) => c.uid === uid);
+}
 
 /** Pierwsze sprawne stworzenie (prowadzący drużynę / towarzysz na mapie). */
 export function leadCreature(party: Creature[]): Creature | null {

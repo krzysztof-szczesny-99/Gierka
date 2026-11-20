@@ -1067,3 +1067,33 @@ input {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ── Sprint 4: natura, ewolucja ── */
+.nature-up {
+  color: #5fd38d;
+}
+.nature-down {
+  color: #f08a7e;
+}
+.evolution {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.evolution-pair {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  gap: 8px;
+}
+.evolution-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.evolution-arrow {
+  font-size: 26px;
+  color: var(--accent);
+}

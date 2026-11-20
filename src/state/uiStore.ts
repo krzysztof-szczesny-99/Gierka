@@ -45,6 +45,19 @@ export interface LearnRequest {
   move: MoveData;
 }
 
+/** Propozycja ewolucji (okno „Ewoluuj / Przerwij”) — po awansie, z Drużyny albo po użyciu kamienia. */
+export interface EvolutionRequest {
+  uid: string;
+  /** Gatunek docelowy (nazwa z PokéAPI) i jego id. */
+  toSpecies: string;
+  toSpeciesId: number;
+  method: 'LEVEL' | 'ITEM';
+  /** Kamień ewolucji (metoda ITEM) — zużywany dopiero po potwierdzeniu. */
+  itemId: string | null;
+  /** Opis spełnionego warunku, np. „poziom 7” albo nazwa kamienia. */
+  condition: string;
+}
+
 /** Zdarzenie instalacji PWA (Chrome/Android) — brak w standardowych typach DOM. */
 export interface BeforeInstallPromptEvent extends Event {
   prompt(): Promise<void>;
@@ -58,6 +71,7 @@ interface UiStore {
   toast: { id: number; text: string } | null;
   transition: boolean;
   learnQueue: LearnRequest[];
+  evolutionQueue: EvolutionRequest[];
   online: boolean;
   installPrompt: BeforeInstallPromptEvent | null;
   offlineReady: boolean;
@@ -116,6 +130,8 @@ interface UiStore {
   setTransition(v: boolean): void;
   pushLearn(reqs: LearnRequest[]): void;
   shiftLearn(): void;
+  pushEvolutions(reqs: EvolutionRequest[]): void;
+  shiftEvolution(): void;
   setOnline(v: boolean): void;
   setInstallPrompt(e: BeforeInstallPromptEvent | null): void;
   setOfflineReady(v: boolean): void;
@@ -130,6 +146,7 @@ export const useUi = create<UiStore>()((set, get) => ({
   toast: null,
   transition: false,
   learnQueue: [],
+  evolutionQueue: [],
   online: typeof navigator === 'undefined' ? true : navigator.onLine !== false,
   installPrompt: null,
   offlineReady: false,
@@ -149,7 +166,7 @@ export const useUi = create<UiStore>()((set, get) => ({
     if (s.mode !== 'overworld') return null;
     if (s.gameMode !== 'EXPLORATION' || s.activeEncounterId !== null) return null;
     if (s.encounterCooldown > 0) return null;
-    if (s.modal !== null || s.dialog !== null || s.transition || s.learnQueue.length > 0) return null;
+    if (s.modal !== null || s.dialog !== null || s.transition || s.learnQueue.length > 0 || s.evolutionQueue.length > 0) return null;
     const id = `enc-${++encounterSeq}`;
     set({ gameMode: 'ENCOUNTER_STARTING', activeEncounterId: id, sourceEntityId, inputLocked: true });
     return id;
@@ -184,7 +201,8 @@ export const useUi = create<UiStore>()((set, get) => ({
   registerEncounterStep: (input, rng) => {
     const s = get();
     // Przy otwartym oknie, dialogu lub przejściu krok nie losuje (i nie może przejąć blokady).
-    const uiBusy = s.mode !== 'overworld' || s.modal !== null || s.dialog !== null || s.transition || s.learnQueue.length > 0;
+    const uiBusy =
+      s.mode !== 'overworld' || s.modal !== null || s.dialog !== null || s.transition || s.learnQueue.length > 0 || s.evolutionQueue.length > 0;
     const decision = evaluateEncounterStep(
       {
         gameMode: uiBusy ? 'BLOCKED' : s.gameMode,
@@ -252,6 +270,12 @@ export const useUi = create<UiStore>()((set, get) => ({
   setTransition: (transition) => set({ transition }),
   pushLearn: (reqs) => set((s) => ({ learnQueue: [...s.learnQueue, ...reqs] })),
   shiftLearn: () => set((s) => ({ learnQueue: s.learnQueue.slice(1) })),
+  pushEvolutions: (reqs) =>
+    set((s) => ({
+      // Jedno stworzenie — najwyżej jedna propozycja w kolejce.
+      evolutionQueue: [...s.evolutionQueue, ...reqs.filter((r) => !s.evolutionQueue.some((q) => q.uid === r.uid))],
+    })),
+  shiftEvolution: () => set((s) => ({ evolutionQueue: s.evolutionQueue.slice(1) })),
   setOnline: (online) => set({ online }),
   setInstallPrompt: (installPrompt) => set({ installPrompt }),
   setOfflineReady: (offlineReady) => set({ offlineReady }),
@@ -267,6 +291,7 @@ export function isOverworldBlocked(): boolean {
     s.modal !== null ||
     s.dialog !== null ||
     s.transition ||
-    s.learnQueue.length > 0
+    s.learnQueue.length > 0 ||
+    s.evolutionQueue.length > 0
   );
 }

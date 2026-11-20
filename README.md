@@ -94,7 +94,18 @@ zapis, zbuforowane dane i sprite'y; w trawie spotkasz offline tylko gatunki, kt�
   w paprociach (m.in. caterpie, weedle, oddish, hoothoot, seedot, skwovet, rzadko fomantis). Północna ścieżka na
   Wzgórza Wiatru jest zablokowana komunikatem (lokacja w planach). Przejście: wygaszenie ekranu, zapis położenia,
   2 kroki ochronne po wejściu. Przegrana w Zagajniku przenosi do Stacji Opieki na Polanie.
-- Zapis w formacie v2 (region, lokacja, punkt pojawienia się, pozycja). Starsze zapisy (v1) są migrowane automatycznie —
+- Rozwój stworzeń (Sprint 4):
+  - **Natury** — 25 natur (5 neutralnych): +10% jednej statystyki i −10% innej. Widać je w Drużynie (▲/▼ przy statystykach).
+  - **Zdolności** — działa 20 prostych zdolności (`src/config/abilities.ts`): wzmocnienie typu przy niskim PŻ, „Groźne
+    spojrzenie”, ochrona statystyk, odporności na status, „Zrzucanie skóry”, „Chłonięcie wody”, „Gruby tłuszcz”,
+    „Ucieczka”, „Pyłek osłonny”, „Ranny ptaszek”. Pozostałe zdolności są opisane w Drużynie jako „jeszcze nie działa”.
+  - **Przedmioty trzymane** — 10 przedmiotów w Kramie (wzmacniacze typów, opaska, okulary, resztki, jagody, pazur,
+    obciążnik). Zakładanie z Torby lub Drużyny zabiera 1 sztukę z torby, a zdjęcie ją zwraca.
+  - **Ewolucje** — dane łańcucha z PokéAPI (bufor) przetwarzane do lokalnego modelu. Ewolucja przez poziom (okno po walce,
+    „Ewoluuj” / „Przerwij”, przycisk w Drużynie) i przez kamień z Torby. Ruchy, poziom i doświadczenie zostają.
+    Warunki, których silnik nie obsługuje (przyjaźń, pora dnia, wymiana, miejsce, formy regionalne), są oznaczone
+    NOT_IMPLEMENTED.
+- Zapis w formacie v3 (Sprint 4: natura, zdolność, przedmiot i stan ewolucji stworzeń; wcześniej v2 — położenie w świecie). Starsze zapisy (v1) są migrowane automatycznie —
   postęp i pozycja na Polanie zostają. Błędna lokacja lub pozycja w zapisie → bezpieczny punkt pojawienia się.
 - Ruch po siatce: joystick ekranowy, opcjonalnie klawiatura; bieg; kamera z dopasowaniem przybliżenia.
 - Spotkania przez jedną centralną blokadę (tylko jedno naraz, wynik walki liczony dokładnie raz, krótkie odnowienie po walce).
@@ -120,7 +131,7 @@ zapis, zbuforowane dane i sprite'y; w trawie spotkasz offline tylko gatunki, kt�
 
 ## Zaplanowane (kolejne etapy)
 
-- Etap 2: ewolucje, natury, pierwsze zdolności, przedmioty trzymane, trenerzy z AI, kolejne lokacje (Wzgórza Wiatru), import map z Tiled.
+- Etap 2: trenerzy z AI, kolejne zdolności i przedmioty, trudniejsze warunki ewolucji, kolejne lokacje (Wzgórza Wiatru), import map z Tiled.
 - Etap 3: walki podwójne, ruchy wieloturowe, pogoda, współdzielony EXP, lepszy magazyn.
 - Etap 4: otwarte strefy (rzut kapsułą z mapy, unik, zachowania stworzeń), pora dnia, zadania badawcze.
 - Etap 5: pierwsza przygoda (8 prób), drugi region, megaewolucje, interakcje z towarzyszem.
@@ -129,9 +140,10 @@ zapis, zbuforowane dane i sprite'y; w trawie spotkasz offline tylko gatunki, kt�
 
 ## Znane ograniczenia etapu 1
 
-- Zdolności i przedmioty trzymane są zapisywane, ale jeszcze nie działają w walce.
+- Działa 20 zdolności i 10 przedmiotów trzymanych — pozostałe zdolności z PokéAPI są tylko zapisywane.
+- Ewolucje: tylko poziom i kamień (opcjonalnie z płcią); formy regionalne jeszcze nie ewoluują.
 - Ruchy wieloturowe (np. ładowanie, odpoczynek po ataku) działają jak zwykły atak; pogoda i pola bitwy — brak.
-- Brak ewolucji i trenerów (dane są już przygotowane w modelu).
+- Brak trenerów (dane są już przygotowane w modelu).
 - Nazwy stworzeń i ruchów są angielskie (PokéAPI nie ma języka polskiego).
 - Przerwana walka (zamknięcie aplikacji) nie jest wznawiana — wracasz na mapę sprzed walki.
 
