@@ -7,10 +7,11 @@ import {
   evolveCreature,
   levelEvolutionToOffer,
   normalizeEvolutionChain,
+  normalizeEvolutionDetail,
   type RawEvolutionChain,
 } from '../evolution';
 import { createRng } from '../rng';
-import { CATERPIE_CHAIN, detail, EEVEE_CHAIN, ref, useItem } from './evolutionFixtures';
+import { CATERPIE_CHAIN, detail, EEVEE_CHAIN, LEAFEON_CHAIN, RATTATA_CHAIN, ref, useItem, WOOPER_CHAIN } from './evolutionFixtures';
 import { calcStats } from '../stats';
 import { makeCreature, makePokemon, makeSpecies } from './fixtures';
 
@@ -42,8 +43,9 @@ describe('normalizacja łańcucha z PokéAPI', () => {
     expect(by('vaporeon')[0]).toMatchObject({ method: 'ITEM', itemApi: 'water-stone' });
     expect(by('espeon')[0]).toMatchObject({ method: 'NOT_IMPLEMENTED' });
     expect(by('espeon')[0].unsupported).toEqual(['przyjaźń', 'pora dnia']);
-    expect(by('glaceon').map((x) => x.method)).toEqual(['ITEM', 'NOT_IMPLEMENTED']);
-    expect(by('glaceon')[1].unsupported).toEqual(['miejsce']);
+    // Jest droga obsługiwana (kamień) — alternatywa „miejsce” nie jest pokazywana.
+    expect(by('glaceon').map((x) => x.method)).toEqual(['ITEM']);
+    expect(normalizeEvolutionDetail('eevee', ref('glaceon', 471), detail({ location: { name: 'ice-rock', url: '' } }))).toMatchObject({ method: 'NOT_IMPLEMENTED', unsupported: ['miejsce'] });
     expect(by('sylveon')[0].unsupported).toEqual(['typ znanego ruchu', 'więź']);
   });
 
@@ -55,21 +57,59 @@ describe('normalizacja łańcucha z PokéAPI', () => {
   });
 });
 
+describe('dane w kształcie bieżącego PokéAPI (wersje gier, formy)', () => {
+  it('metadane version_group / is_default / required_pokemon_form nie blokują ewolucji przez poziom', () => {
+    const o = normalizeEvolutionChain(CATERPIE_CHAIN).options[0];
+    expect(o).toMatchObject({ method: 'LEVEL', minLevel: 7, unsupported: [], preferred: true });
+  });
+
+  it('Leafeon: kamień z dwóch wersji gier łączony w jedną drogę; „miejsce” pomijane, bo jest droga obsługiwana', () => {
+    const o = normalizeEvolutionChain(LEAFEON_CHAIN).options;
+    const leafeon = o.filter((x) => x.to === 'leafeon');
+    expect(leafeon).toHaveLength(1);
+    expect(leafeon[0]).toMatchObject({ method: 'ITEM', itemApi: 'leaf-stone', requiredForm: 'eevee', preferred: true });
+    const umbreon = o.filter((x) => x.to === 'umbreon');
+    expect(umbreon).toHaveLength(1);
+    expect(umbreon[0]).toMatchObject({ method: 'NOT_IMPLEMENTED', unsupported: ['przyjaźń', 'pora dnia'] });
+    const checks = evaluateEvolutions({ level: 10, gender: 'M', pokemon: 'eevee' }, 'eevee', true, normalizeEvolutionChain(LEAFEON_CHAIN));
+    expect(checks.find((x) => x.option.to === 'leafeon')).toMatchObject({ status: 'NEEDS_ITEM', itemId: 'stone-leaf' });
+  });
+
+  it('formy regionalne: każda forma widzi tylko swoją drogę; forma docelowa regionalna → NOT_IMPLEMENTED', () => {
+    const chain = normalizeEvolutionChain(RATTATA_CHAIN);
+    const plain = evaluateEvolutions({ level: 20, gender: 'M', pokemon: 'rattata' }, 'rattata', true, chain);
+    expect(plain).toHaveLength(1);
+    expect(plain[0]).toMatchObject({ status: 'READY' });
+    const alola = evaluateEvolutions({ level: 20, gender: 'M', pokemon: 'rattata-alola' }, 'rattata', false, chain);
+    expect(alola).toHaveLength(1);
+    expect(alola[0].status).toBe('NOT_IMPLEMENTED');
+    expect(alola[0].option.unsupported).toEqual(['pora dnia', 'forma docelowa']);
+  });
+
+  it('forma regionalna z jawną drogą do innego gatunku ewoluuje normalnie (wooper-paldea → clodsire)', () => {
+    const chain = normalizeEvolutionChain(WOOPER_CHAIN);
+    const paldea = evaluateEvolutions({ level: 20, gender: 'F', pokemon: 'wooper-paldea' }, 'wooper', false, chain);
+    expect(paldea.map((x) => [x.option.to, x.status])).toEqual([['clodsire', 'READY']]);
+    const plain = evaluateEvolutions({ level: 20, gender: 'F', pokemon: 'wooper' }, 'wooper', true, chain);
+    expect(plain.map((x) => [x.option.to, x.status])).toEqual([['quagsire', 'READY']]);
+  });
+});
+
 describe('ocena warunków dla stworzenia', () => {
   const caterpie = normalizeEvolutionChain(CATERPIE_CHAIN);
   const eevee = normalizeEvolutionChain(EEVEE_CHAIN);
 
   it('poziom: przed progiem WAITING, od progu READY; tylko drogi z bieżącego gatunku', () => {
-    expect(evaluateEvolutions({ level: 6, gender: 'M' }, 'caterpie', true, caterpie).map((x) => x.status)).toEqual(['WAITING']);
-    const ready = evaluateEvolutions({ level: 7, gender: 'M' }, 'caterpie', true, caterpie);
+    expect(evaluateEvolutions({ level: 6, gender: 'M', pokemon: 'caterpie' }, 'caterpie', true, caterpie).map((x) => x.status)).toEqual(['WAITING']);
+    const ready = evaluateEvolutions({ level: 7, gender: 'M', pokemon: 'caterpie' }, 'caterpie', true, caterpie);
     expect(ready).toHaveLength(1);
     expect(ready[0]).toMatchObject({ status: 'READY', condition: 'poziom 7' });
     expect(ready[0].option.to).toBe('metapod');
-    expect(evaluateEvolutions({ level: 50, gender: 'M' }, 'butterfree', true, caterpie)).toEqual([]);
+    expect(evaluateEvolutions({ level: 50, gender: 'M', pokemon: 'butterfree' }, 'butterfree', true, caterpie)).toEqual([]);
   });
 
   it('przedmiot: lokalny kamień → NEEDS_ITEM; przedmiot spoza gry → NOT_IMPLEMENTED', () => {
-    const checks = evaluateEvolutions({ level: 10, gender: 'F' }, 'eevee', true, eevee);
+    const checks = evaluateEvolutions({ level: 10, gender: 'F', pokemon: 'eevee' }, 'eevee', true, eevee);
     expect(checks.find((x) => x.option.to === 'vaporeon')).toMatchObject({ status: 'NEEDS_ITEM', itemId: 'stone-water' });
     expect(checks.find((x) => x.option.to === 'jolteon')).toMatchObject({ status: 'NEEDS_ITEM', itemId: 'stone-thunder' });
     expect(checks.filter((x) => x.option.to === 'glaceon').every((x) => x.status === 'NOT_IMPLEMENTED')).toBe(true);
@@ -77,16 +117,16 @@ describe('ocena warunków dla stworzenia', () => {
   });
 
   it('forma regionalna i płeć', () => {
-    expect(evaluateEvolutions({ level: 30, gender: 'M' }, 'caterpie', false, caterpie)[0].status).toBe('NOT_IMPLEMENTED');
+    expect(evaluateEvolutions({ level: 30, gender: 'M', pokemon: 'caterpie-x' }, 'caterpie', false, caterpie)[0].status).toBe('NOT_IMPLEMENTED');
     const kadabra = normalizeEvolutionChain(OTHER_CHAIN);
-    expect(evaluateEvolutions({ level: 30, gender: 'F' }, 'kadabra', true, kadabra).some((x) => x.option.to === 'gallade')).toBe(false);
-    expect(evaluateEvolutions({ level: 30, gender: 'M' }, 'kadabra', true, kadabra).some((x) => x.option.to === 'gallade')).toBe(true);
+    expect(evaluateEvolutions({ level: 30, gender: 'F', pokemon: 'kadabra' }, 'kadabra', true, kadabra).some((x) => x.option.to === 'gallade')).toBe(false);
+    expect(evaluateEvolutions({ level: 30, gender: 'M', pokemon: 'kadabra' }, 'kadabra', true, kadabra).some((x) => x.option.to === 'gallade')).toBe(true);
   });
 
   it('propozycja po awansie: anulowana na danym poziomie wraca dopiero po kolejnym; wyczerpane — nie', () => {
     const base = { uid: 'c-1', gender: 'M' as const, hp: 10 };
     const at = (level: number, cancelledAtLevel: number | null, hp = 10) =>
-      levelEvolutionToOffer({ ...base, hp, level, evolutionState: { cancelledAtLevel, evolvedFrom: null } }, evaluateEvolutions({ level, gender: 'M' }, 'caterpie', true, caterpie));
+      levelEvolutionToOffer({ ...base, hp, level, evolutionState: { cancelledAtLevel, evolvedFrom: null } }, evaluateEvolutions({ level, gender: 'M', pokemon: 'caterpie' }, 'caterpie', true, caterpie));
     expect(at(7, null)?.option.to).toBe('metapod');
     expect(at(7, 7)).toBeNull();
     expect(at(8, 7)?.option.to).toBe('metapod');

@@ -995,6 +995,15 @@ const patchEnemy = (patch) => S((patch) => {
   B.setState({ engine });
 }, patch);
 let leadBefore = null;
+/** Sprzątanie po ewentualnym błędzie poprzedniego testu: okna, dialogi, okno ewolucji → mapa. */
+async function ensureMap() {
+  for (let i = 0; i < 3; i++) {
+    await closeDialogs();
+    if (await page.getByTestId('evolution-modal').count()) await page.getByTestId('evolution-modal').getByRole('button', { name: 'Przerwij' }).click();
+    await closeModal();
+  }
+  await waitJoystick();
+}
 
 // ───────────── E1. Natura, zdolność i przedmiot w Drużynie; zakładanie z Torby i zdejmowanie ─────────────
 try {
@@ -1033,7 +1042,7 @@ try {
 
 // ───────────── E2. Przedmiot trzymany działa w walce (Resztki prowiantu na koniec tury) ─────────────
 try {
-  await waitJoystick();
+  await ensureMap();
   await S(() => {
     const G = window.__szlaki.stores.useGame;
     G.setState((s) => ({ party: s.party.map((c, i) => (i === 0 ? { ...c, hp: Math.max(1, Math.floor(c.stats.hp / 2)), status: null } : c)) }));
@@ -1056,7 +1065,7 @@ try {
 
 // ───────────── E3. Zdolność działa w walce (Ucieczka: pewna ucieczka od dużo szybszego przeciwnika) ─────────────
 try {
-  await waitJoystick();
+  await ensureMap();
   const original = (await lead()).abilityId;
   await S(() => window.__szlaki.stores.useGame.setState((s) => ({ party: s.party.map((c, i) => (i === 0 ? { ...c, abilityId: 'run-away' } : c)) })));
   await grassEncounter();
@@ -1078,7 +1087,7 @@ try {
 // ───────────── E4. Ewolucja przez poziom od początku do końca (prawdziwe dane PokéAPI): anulowanie, potem ewolucja ─────────────
 let e4 = null;
 try {
-  await waitJoystick();
+  await ensureMap();
   const before = await lead();
   const info = await S(async () => {
     const c = window.__szlaki.stores.useGame.getState().party[0];
@@ -1142,7 +1151,7 @@ try {
 
 // ───────────── E5. Ewolucja kamieniem z Torby (Eevee + Kamień przypływu): anulowanie nie zużywa kamienia ─────────────
 try {
-  await waitJoystick();
+  await ensureMap();
   const eevee = await S(async () => {
     const C = window.__szlaki.creatures;
     const G = window.__szlaki.stores.useGame;
@@ -1188,7 +1197,7 @@ try {
 
 // ───────────── E6. Zapis i wczytanie nowych pól (natura, zdolność, przedmiot, stan ewolucji) ─────────────
 try {
-  await waitJoystick();
+  await ensureMap();
   await setStepRng('miss');
   await controlRestored(); // ruch → autozapis
   await idle(2800);
@@ -1207,7 +1216,7 @@ try {
 
 // ───────────── E7. Zgodność starego zapisu v2 (stworzenia bez natury, pola ability/heldItem) ─────────────
 try {
-  await waitJoystick();
+  await ensureMap();
   const v2 = await S(() => {
     const snap = structuredClone(window.__szlaki.stores.useGame.getState().snapshot());
     const old = (c) => {

@@ -25,6 +25,10 @@ export interface EvolutionOption {
   gender: Gender | null;
   /** Opis nieobsługiwanych warunków (metoda NOT_IMPLEMENTED). */
   unsupported: string[];
+  /** Forma, której dotyczy ta droga (PokéAPI required_pokemon_form), np. „rattata-alola”. */
+  requiredForm: string | null;
+  /** Wpis oznaczony w PokéAPI jako domyślny (is_default) — przy kilku wersjach gier wybieramy go. */
+  preferred: boolean;
 }
 
 export interface EvolutionChainData {
@@ -43,6 +47,11 @@ export interface RawEvolutionDetail {
   min_level?: number | null;
   item?: RawRef | null;
   gender?: number | null;
+  /** Metadane wersji gier (nie są warunkiem). */
+  version_group?: RawRef | null;
+  is_default?: boolean | null;
+  required_pokemon_form?: RawRef | null;
+  evolved_pokemon_form?: RawRef | null;
   [key: string]: unknown;
 }
 export interface RawChainLink {
@@ -71,6 +80,15 @@ const CONDITION_LABEL: Record<string, string> = {
   needs_overworld_rain: 'deszcz',
   trade_species: 'wymiana',
   turn_upside_down: 'odwrócenie urządzenia',
+  near_special_rock: 'specjalny kamień w pobliżu',
+  needs_multiplayer: 'gra wieloosobowa',
+  min_steps: 'liczba kroków',
+  min_move_count: 'liczba użyć ruchu',
+  min_damage_taken: 'otrzymane obrażenia',
+  used_move: 'użyty ruch',
+  allowed_natures: 'natura',
+  region: 'region',
+  condition_expression: 'złożony warunek',
 };
 const TRIGGER_LABEL: Record<string, string> = {
   trade: 'wymiana',
@@ -79,8 +97,11 @@ const TRIGGER_LABEL: Record<string, string> = {
   'three-critical-hits': 'trzy trafienia krytyczne',
   'take-damage': 'otrzymane obrażenia',
 };
-/** Pola szczegółu, które model obsługuje (pozostałe ustawione = warunek nieobsługiwany). */
-const HANDLED = new Set(['trigger', 'min_level', 'item', 'gender']);
+/**
+ * Pola szczegółu, które model obsługuje albo które są metadanymi wersji gier (version_group, is_default).
+ * Każde inne ustawione pole to warunek, którego silnik jeszcze nie obsługuje.
+ */
+const HANDLED = new Set(['trigger', 'min_level', 'item', 'gender', 'version_group', 'is_default', 'required_pokemon_form', 'evolved_pokemon_form']);
 
 const isSet = (v: unknown) => v !== null && v !== undefined && v !== false && v !== '' && !(Array.isArray(v) && v.length === 0);
 const speciesIdFromUrl = (url: string) => Number(/\/(\d+)\/?$/.exec(url)?.[1] ?? 0);
@@ -92,9 +113,21 @@ export function normalizeEvolutionDetail(from: string, to: RawRef, d: RawEvoluti
     if (HANDLED.has(key) || !isSet(value)) continue;
     unsupported.push(CONDITION_LABEL[key] ?? key.replace(/_/g, ' '));
   }
+  // Ewolucja do innej formy niż domyślna gatunku docelowego (np. forma regionalna) — jeszcze nieobsługiwana.
+  const evolvedForm = d.evolved_pokemon_form?.name ?? null;
+  if (evolvedForm && evolvedForm !== to.name) unsupported.push('forma docelowa');
   const trigger = d.trigger?.name ?? '';
   const gender: Gender | null = d.gender === 1 ? 'F' : d.gender === 2 ? 'M' : null;
-  const base = { from, to: to.name, toSpeciesId: speciesIdFromUrl(to.url), gender, minLevel: d.min_level ?? null, itemApi: d.item?.name ?? null };
+  const base = {
+    from,
+    to: to.name,
+    toSpeciesId: speciesIdFromUrl(to.url),
+    gender,
+    minLevel: d.min_level ?? null,
+    itemApi: d.item?.name ?? null,
+    requiredForm: d.required_pokemon_form?.name ?? null,
+    preferred: d.is_default === true,
+  };
   if (trigger === 'level-up' && d.min_level && !unsupported.length) return { ...base, method: 'LEVEL', unsupported };
   if (trigger === 'use-item' && d.item && !unsupported.length) return { ...base, method: 'ITEM', unsupported };
   if (trigger === 'level-up' && !d.min_level && !unsupported.length) unsupported.push('awans bez określonego poziomu');
@@ -102,17 +135,52 @@ export function normalizeEvolutionDetail(from: string, to: RawRef, d: RawEvoluti
   return { ...base, method: 'NOT_IMPLEMENTED', unsupported };
 }
 
+/**
+ * Cały łańcuch → lokalne opcje. PokéAPI podaje osobne szczegóły dla różnych wersji gier, więc:
+ * identyczne opcje łączymy, a gdy do danego gatunku (i formy) prowadzi obsługiwana droga, pomijamy
+ * nieobsługiwane alternatywy (np. Leafeon: kamień zamiast „miejsca”). Bez obsługiwanej drogi zostaje
+ * jedna opcja NOT_IMPLEMENTED (preferowana ta oznaczona jako domyślna).
+ */
 export function normalizeEvolutionChain(raw: RawEvolutionChain): EvolutionChainData {
-  const options: EvolutionOption[] = [];
+  const all: EvolutionOption[] = [];
   const walk = (link: RawChainLink) => {
     for (const next of link.evolves_to) {
       const details = next.evolution_details.length ? next.evolution_details : [{ trigger: null } as RawEvolutionDetail];
-      for (const d of details) options.push(normalizeEvolutionDetail(link.species.name, next.species, d));
+      for (const d of details) all.push(normalizeEvolutionDetail(link.species.name, next.species, d));
       walk(next);
     }
   };
   walk(raw.chain);
+
+  const unique = new Map<string, EvolutionOption>();
+  for (const o of all) {
+    const key = JSON.stringify([o.from, o.to, o.requiredForm, o.method, o.minLevel, o.itemApi, o.gender, o.unsupported]);
+    const prev = unique.get(key);
+    if (prev) prev.preferred = prev.preferred || o.preferred;
+    else unique.set(key, { ...o });
+  }
+  const groups = new Map<string, EvolutionOption[]>();
+  for (const o of unique.values()) {
+    const key = JSON.stringify([o.from, o.to, o.requiredForm]);
+    groups.set(key, [...(groups.get(key) ?? []), o]);
+  }
+  const options: EvolutionOption[] = [];
+  for (const group of groups.values()) {
+    const supported = group.filter((o) => o.method !== 'NOT_IMPLEMENTED');
+    if (supported.length) options.push(...supported);
+    else options.push(group.find((o) => o.preferred) ?? group[0]);
+  }
   return { id: raw.id, options };
+}
+
+const REGIONAL_FORM = /-(alola|galar|hisui|paldea)\b/;
+
+/** Czy droga dotyczy formy tego stworzenia (required_pokemon_form). */
+function formMatches(option: EvolutionOption, pokemonName: string, isDefaultForm: boolean): boolean {
+  const req = option.requiredForm;
+  if (!req || req === pokemonName) return true;
+  // Forma domyślna może mieć nazwę formy z dopiskiem (np. „burmy-plant”) — ale nie formę regionalną.
+  return isDefaultForm && !REGIONAL_FORM.test(req);
 }
 
 // ───────────────────────────── ocena warunków ─────────────────────────────
@@ -133,7 +201,7 @@ export interface EvolutionCheck {
  * nie ewoluują w tej wersji — mają status NOT_IMPLEMENTED. Drogi wykluczone płcią są pomijane.
  */
 export function evaluateEvolutions(
-  c: Pick<Creature, 'level' | 'gender'>,
+  c: Pick<Creature, 'level' | 'gender' | 'pokemon'>,
   speciesName: string,
   isDefaultForm: boolean,
   chain: EvolutionChainData,
@@ -142,7 +210,9 @@ export function evaluateEvolutions(
   for (const option of chain.options) {
     if (option.from !== speciesName) continue;
     if (option.gender && option.gender !== c.gender) continue;
-    if (!isDefaultForm) {
+    if (!formMatches(option, c.pokemon, isDefaultForm)) continue;
+    // Forma niedomyślna (regionalna) ewoluuje tylko drogą wskazaną jawnie dla tej formy.
+    if (!isDefaultForm && option.requiredForm !== c.pokemon) {
       out.push({ option, status: 'NOT_IMPLEMENTED', itemId: null, condition: 'forma regionalna — jeszcze nieobsługiwana' });
       continue;
     }
