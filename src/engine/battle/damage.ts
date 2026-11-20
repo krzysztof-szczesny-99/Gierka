@@ -4,6 +4,7 @@ import type { Rng } from '../rng';
 import { stageMultiplier } from '../stats';
 import { effectiveness } from '../typeChart';
 import type { Creature, MoveData, TypeChart } from '../types';
+import { attackerDamageMultiplier, defenderDamageMultiplier } from './effects';
 import type { Boosts } from './types';
 
 export interface DamageInput {
@@ -69,5 +70,10 @@ export function calcDamage(input: DamageInput): DamageResult {
   base = Math.floor((base * rand) / 100);
   if (!input.typeless && attacker.types.includes(move.type as never)) base = Math.floor(base * RULES.stabMultiplier);
   base = Math.floor(base * eff);
+  // Zdolności i przedmioty trzymane (Sprint 4): np. „Płomień” w opałach, „Węgielek”, „Gruby tłuszcz”.
+  if (!input.typeless) {
+    const mod = attackerDamageMultiplier(attacker, move) * defenderDamageMultiplier(defender, move);
+    if (mod !== 1) base = Math.floor(base * mod);
+  }
   return { damage: Math.max(1, base), effectiveness: eff, crit };
 }

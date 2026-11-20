@@ -23,8 +23,10 @@ import type { StaticEncounterDef } from '../game/maps/testMap';
 import { getLocation, healingTarget, startLocation, type WorldPosition } from '../game/world';
 import { useBattle } from '../state/battleStore';
 import { useGame } from '../state/gameStore';
-import { encounterClock, useUi, type EncounterEndReason, type LearnRequest } from '../state/uiStore';
+import { encounterClock, useUi, type EncounterEndReason, type EvolutionRequest, type LearnRequest } from '../state/uiStore';
 import { buildWild, dexInfo, errorMessage, loadMovesSafe, type WildSpawn } from './creatureService';
+import { pendingLevelEvolutions } from './evolutionService';
+import type { Creature } from '../engine/types';
 
 /** Zależności zewnętrzne (dane, zapis, losowość, czas) — podmienialne w testach jednostkowych. */
 export interface EncounterDeps {
@@ -43,6 +45,8 @@ export interface EncounterDeps {
   now(): number;
   /** Minimalny czas animacji przejścia do walki. */
   minTransitionMs: number;
+  /** Propozycje ewolucji dla stworzeń, które awansowały w walce (dane łańcucha z bufora). */
+  collectEvolutions(party: Creature[], leveledUids: string[]): Promise<EvolutionRequest[]>;
 }
 
 const DEFAULT_DEPS: EncounterDeps = {
@@ -57,6 +61,7 @@ const DEFAULT_DEPS: EncounterDeps = {
   buildStepSpawn: buildStepSpawnFromTable,
   now: encounterClock,
   minTransitionMs: 750,
+  collectEvolutions: pendingLevelEvolutions,
 };
 
 let deps: EncounterDeps = DEFAULT_DEPS;
@@ -188,10 +193,13 @@ export async function finishBattle(): Promise<boolean> {
   const notes: string[] = [];
   const requests: LearnRequest[] = [];
   let returnTo: WorldPosition | null = null;
+  let leveled: string[] = [];
 
   try {
     // 2) Przetworzenie wyniku.
     const game = useGame.getState();
+    const levelBefore = new Map(game.party.map((c) => [c.uid, c.level]));
+    leveled = st.sides[0].party.filter((c) => c.level > (levelBefore.get(c.uid) ?? c.level)).map((c) => c.uid);
     game.updateCreatures(st.sides[0].party);
 
     if (outcome === 'caught' && st.caught) {
@@ -261,6 +269,16 @@ export async function finishBattle(): Promise<boolean> {
   };
   if (notes.length) ui.showDialog(notes, pushLearns);
   else pushLearns();
+  // Ewolucje po awansie: okno pojawi się po komunikatach i nauce ruchów (EvolutionModal czeka na nie).
+  // Po przegranej (powrót do Stacji Opieki) ewolucji nie proponujemy.
+  if (leveled.length && !returnTo) {
+    deps
+      .collectEvolutions(useGame.getState().party, leveled)
+      .then((reqs) => {
+        if (reqs.length) useUi.getState().pushEvolutions(reqs);
+      })
+      .catch(() => undefined);
+  }
   deps.saveNow().catch(() => undefined);
   return true;
 }

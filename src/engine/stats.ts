@@ -1,23 +1,27 @@
+import { natureMultiplier, type NatureId } from '../config/natures';
 import { RULES } from '../config/rules';
 import type { Rng } from './rng';
 import { STAT_KEYS, type StatKey, type Stats } from './types';
 
 export const ZERO_STATS: Stats = { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 };
 
-/** Standardowy wzór na statystykę (natury neutralne w MVP). */
-export function calcStat(key: StatKey, base: number, iv: number, ev: number, level: number): number {
+/**
+ * Standardowy wzór na statystykę. Natura mnoży statystyki inne niż PŻ przez 1,1 / 0,9 (zaokrąglenie w dół);
+ * brak natury lub natura neutralna — bez zmian.
+ */
+export function calcStat(key: StatKey, base: number, iv: number, ev: number, level: number, nature?: NatureId | null): number {
   const core = Math.floor(((2 * base + iv + Math.floor(ev / 4)) * level) / 100);
   if (key === 'hp') {
     // Gatunki z bazowym HP = 1 (np. specjalne przypadki) zawsze mają 1 PŻ.
     if (base === 1) return 1;
     return core + level + 10;
   }
-  return core + 5;
+  return Math.floor((core + 5) * natureMultiplier(nature, key));
 }
 
-export function calcStats(base: Stats, ivs: Stats, evs: Stats, level: number): Stats {
+export function calcStats(base: Stats, ivs: Stats, evs: Stats, level: number, nature?: NatureId | null): Stats {
   const out = { ...ZERO_STATS };
-  for (const k of STAT_KEYS) out[k] = calcStat(k, base[k], ivs[k], evs[k], level);
+  for (const k of STAT_KEYS) out[k] = calcStat(k, base[k], ivs[k], evs[k], level, nature);
   return out;
 }
 

@@ -1,8 +1,9 @@
+import { NATURE_IDS, type NatureId } from '../config/natures';
 import { RULES } from '../config/rules';
 import { expForLevel } from './experience';
 import { newUid, type Rng } from './rng';
 import { calcStats, randomIvs, ZERO_STATS } from './stats';
-import type { Creature, Gender, GrowthTable, MoveData, MoveSlot, PokemonData, SpeciesData } from './types';
+import { EMPTY_EVOLUTION_STATE, type Creature, type Gender, type GrowthTable, type MoveData, type MoveSlot, type PokemonData, type SpeciesData } from './types';
 
 export interface CreateCreatureParams {
   pokemon: PokemonData;
@@ -14,6 +15,8 @@ export interface CreateCreatureParams {
   metAt: string;
   shiny?: boolean;
   mighty?: boolean;
+  /** Wymuszona natura (testy); domyślnie losowana. */
+  nature?: NatureId;
 }
 
 /** Nazwa wyświetlana formy, np. „Rattata (Alola)”. */
@@ -42,9 +45,13 @@ export function createCreature(p: CreateCreatureParams): Creature {
   const level = Math.max(1, Math.min(RULES.maxLevel, p.level));
   const ivs = randomIvs(p.rng, mighty ? RULES.mightyMinIv : 0);
   const evs = { ...ZERO_STATS };
-  const stats = calcStats(p.pokemon.baseStats, ivs, evs, level);
   const normalAbilities = p.pokemon.abilities.filter((a) => !a.hidden);
-  const ability = (normalAbilities.length ? p.rng.pick(normalAbilities) : p.pokemon.abilities[0])?.name ?? 'brak';
+  const abilityId = (normalAbilities.length ? p.rng.pick(normalAbilities) : p.pokemon.abilities[0])?.name ?? 'brak';
+  const gender = rollGender(p.species, p.rng);
+  const shiny = p.shiny ?? p.rng.chance(RULES.shinyChance);
+  // Natura losowana na końcu (ta sama, kontrolowana losowość co reszta — ziarno w trybie ?debug&seed).
+  const nature = p.nature ?? p.rng.pick(NATURE_IDS);
+  const stats = calcStats(p.pokemon.baseStats, ivs, evs, level, nature);
   return {
     uid: newUid(),
     pokemon: p.pokemon.name,
@@ -61,11 +68,13 @@ export function createCreature(p: CreateCreatureParams): Creature {
     status: null,
     sleepTurns: 0,
     moves: p.moves.slice(0, RULES.maxMoves).map(toMoveSlot),
-    ability,
-    gender: rollGender(p.species, p.rng),
-    shiny: p.shiny ?? p.rng.chance(RULES.shinyChance),
+    nature,
+    abilityId,
+    gender,
+    shiny,
     mighty,
-    heldItem: null,
+    heldItemId: null,
+    evolutionState: { ...EMPTY_EVOLUTION_STATE },
     friendship: p.species.baseHappiness,
     metLevel: level,
     metAt: p.metAt,
@@ -73,9 +82,9 @@ export function createCreature(p: CreateCreatureParams): Creature {
   };
 }
 
-/** Przelicza statystyki po zmianie poziomu/EV, zachowując utracone PŻ. */
+/** Przelicza statystyki po zmianie poziomu/EV/gatunku (z naturą), zachowując utracone PŻ. */
 export function recalcStats(c: Creature, pokemon: PokemonData): Creature {
-  const stats = calcStats(pokemon.baseStats, c.ivs, c.evs, c.level);
+  const stats = calcStats(pokemon.baseStats, c.ivs, c.evs, c.level, c.nature);
   const lost = c.stats.hp - c.hp;
   const hp = c.hp <= 0 ? 0 : Math.max(1, stats.hp - lost);
   return { ...c, stats, hp };

@@ -48,7 +48,13 @@ function Hud() {
   const online = useUi((s) => s.online);
   const blocked = useUi(
     (s) =>
-      s.gameMode !== 'EXPLORATION' || s.inputLocked || s.modal !== null || s.dialog !== null || s.learnQueue.length > 0 || s.transition,
+      s.gameMode !== 'EXPLORATION' ||
+      s.inputLocked ||
+      s.modal !== null ||
+      s.dialog !== null ||
+      s.learnQueue.length > 0 ||
+      s.evolutionQueue.length > 0 ||
+      s.transition,
   );
   const claimable = useClaimableQuests();
   const open = (m: ModalId) => useUi.getState().openModal(m);

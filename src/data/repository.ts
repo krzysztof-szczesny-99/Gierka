@@ -4,6 +4,7 @@
 import { normalizeGrowth, normalizeMove, normalizePokemon, normalizeSpecies, normalizeType } from '../api/normalize';
 import { fetchJson, isOnline } from '../api/pokeapi';
 import type { RawGrowthRate, RawList, RawMove, RawPokemon, RawSpecies, RawType } from '../api/raw';
+import { normalizeEvolutionChain, type EvolutionChainData, type RawEvolutionChain } from '../engine/evolution';
 import { buildTypeChart } from '../engine/typeChart';
 import { TYPE_NAMES, type GrowthTable, type MoveData, type PokemonData, type SpeciesData, type TypeChart } from '../engine/types';
 import { db } from './db';
@@ -71,6 +72,13 @@ export async function getMoves(names: string[]): Promise<Record<string, MoveData
   const out: Record<string, MoveData> = {};
   for (const m of list) out[m.name] = m;
   return out;
+}
+
+/** Łańcuch ewolucji (przetworzony do lokalnego modelu — src/engine/evolution.ts), z buforem. */
+export function getEvolutionChain(id: number): Promise<EvolutionChainData> {
+  return cached(`evolution:${id}`, 'evolution', async () =>
+    normalizeEvolutionChain(await fetchJson<RawEvolutionChain>(`evolution-chain/${id}`)),
+  );
 }
 
 export function getGrowth(name: string): Promise<GrowthTable> {

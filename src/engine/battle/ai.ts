@@ -1,6 +1,7 @@
 import type { Rng } from '../rng';
 import { effectiveness } from '../typeChart';
 import type { Creature, MoveData, TypeChart } from '../types';
+import { abilityBlocksStatus } from './effects';
 import { AILMENT_TO_STATUS, canReceiveStatus } from './status';
 
 export type AiMode = 'random' | 'smart';
@@ -30,7 +31,7 @@ export function chooseMove(
     let score: number;
     if (move.damageClass === 'status') {
       const status = move.meta ? AILMENT_TO_STATUS[move.meta.ailment] : undefined;
-      if (status) score = canReceiveStatus(target, status) ? 45 : 0;
+      if (status) score = canReceiveStatus(target, status) && !abilityBlocksStatus(target, status) ? 45 : 0;
       else if (move.meta?.healing) score = user.hp < user.stats.hp / 2 ? 60 : 5;
       else score = move.statChanges.length ? 20 : 5;
     } else {

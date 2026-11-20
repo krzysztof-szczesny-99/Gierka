@@ -90,6 +90,9 @@ function SpriteImg({ candidates, types, name, facing, scale = 1, maxSize, fallba
   return (
     <img
       className="sprite-img"
+      // Tryb CORS jak przy teksturach mapy (Phaser): service worker buforuje wtedy jedną, pełną odpowiedź,
+      // z której korzystają i <img>, i tekstury WebGL (odpowiedź „opaque” psuła później ładowanie tekstury).
+      crossOrigin="anonymous"
       src={c.url}
       alt={name}
       draggable={false}

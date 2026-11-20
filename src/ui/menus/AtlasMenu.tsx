@@ -39,7 +39,7 @@ export function AtlasMenu() {
             </div>
             <div className="sprite-box" style={{ height: 64 }}>
               {useApi && e.sprite ? (
-                <img className="sprite-img" src={e.sprite} alt={e.name} style={{ width: 64, opacity: e.caught ? 1 : 0.55 }} draggable={false} />
+                <img className="sprite-img" crossOrigin="anonymous" src={e.sprite} alt={e.name} style={{ width: 64, opacity: e.caught ? 1 : 0.55 }} draggable={false} />
               ) : (
                 <BlobSprite type={e.types[0] ?? 'normal'} size={52} />
               )}

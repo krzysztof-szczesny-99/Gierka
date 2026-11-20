@@ -89,15 +89,19 @@ MoveData     { name, displayName, type, power, accuracy, pp, priority, damageCla
                meta{ailment, ailmentChance, category, minHits, maxHits, drain, healing, critRate, flinchChance, statChance},
                statChanges[{stat, change}] }
 Creature     { uid, pokemon (wariant/forma), speciesId, name, nickname?, types[], level, exp, growthRate,
-               ivs, evs, stats, hp, status, sleepTurns, moves[{name, pp, maxPp}], ability, gender, shiny,
-               heldItem, friendship, metLevel, metAt, caughtAt, mighty }
+               ivs, evs, stats, hp, status, sleepTurns, moves[{name, pp, maxPp}], nature, abilityId, gender, shiny,
+               heldItemId, evolutionState{cancelledAtLevel, evolvedFrom}, friendship, metLevel, metAt, caughtAt, mighty }
+EvolutionChainData { id, options[{from, to, toSpeciesId, method: LEVEL|ITEM|NOT_IMPLEMENTED, minLevel, itemApi,
+               gender, unsupported[]}] }   // z PokéAPI /evolution-chain → src/engine/evolution.ts
 BattleState  { turn, sides[2]{kind, party[], active[]}, boosts{uid}, volatiles{uid}, pokemon{}, moves{}, growth{},
                typeChart, captureRate, participants[], awaitingSwitch, outcome, caught, pendingLearns[] }
-SaveData v2  { version: 2, savedAt, player{name, regionId, locationId, spawnPointId, x, y, facing, money, steps, playTimeMs},
+SaveData v3  { version: 3, savedAt, player{name, regionId, locationId, spawnPointId, x, y, facing, money, steps, playTimeMs},
                party[], storage[], bag{}, dex{speciesId: {seen, caught, name, sprite, types}},
                stats{}, questsClaimed{}, flags{}, settings{} }
 Dexie        cache(key, kind, data, fetchedAt) · saves(id, data, updatedAt)
-Migracja     v1 → v2 (src/data/migrations.ts): player.mapId → regionId + locationId + spawnPointId 'start', pozycja bez zmian;
+Migracja     v2 → v3: ability → abilityId, heldItem → heldItemId, natura neutralna (stała z uid — statystyki bez zmian),
+             pusty evolutionState.
+             v1 → v2 (src/data/migrations.ts): player.mapId → regionId + locationId + spawnPointId 'start', pozycja bez zmian;
              nieznana mapa/lokacja → lokacja startowa; wersja nowsza niż obsługiwana → błąd (zapis nie jest nadpisywany).
 
 // Model świata (Sprint 3) — dane w src/config/world.ts, logika i walidacja w src/game/world.ts
@@ -128,17 +132,17 @@ szlaki-dziczy/
    ├─ main.tsx · App.tsx · vite-env.d.ts
    ├─ api/        pokeapi.ts (kolejka, retry, offline) · raw.ts (typy API) · normalize.ts
    ├─ data/       db.ts (Dexie) · repository.ts (bufor pamięć→IndexedDB→API) · saveGame.ts (zapis/autozapis) · migrations.ts (wersje zapisu)
-   ├─ config/     rules.ts · items.ts · encounters.ts · world.ts (regiony, lokacje, połączenia) · quests.ts · moveOverrides.ts · text.ts
-   ├─ engine/     types.ts · rng.ts · stats.ts · typeChart.ts · experience.ts · moves.ts · creature.ts
-   │  ├─ battle/  types.ts · damage.ts · status.ts · catch.ts · ai.ts · battleEngine.ts
+   ├─ config/     rules.ts · items.ts (także przedmioty trzymane i kamienie) · natures.ts · abilities.ts · encounters.ts · world.ts (regiony, lokacje, połączenia) · quests.ts · moveOverrides.ts · text.ts
+   ├─ engine/     types.ts · rng.ts · stats.ts (z naturą) · typeChart.ts · experience.ts · moves.ts · creature.ts · evolution.ts
+   │  ├─ battle/  types.ts · damage.ts · status.ts · catch.ts · ai.ts · effects.ts (zdolności i przedmioty) · battleEngine.ts
    │  └─ __tests__/ engine.test.ts · fixtures.ts
    ├─ game/       PhaserGame.tsx · eventBus.ts · input.ts (joystick) · movement.ts (reguły ruchu) · encounterZones.ts (tereny i losowanie) · world.ts (przejścia, wymagania, bezpieczne wejście, walidacja świata) · tiles.ts · art.ts · textures.ts
    │  ├─ maps/    index.ts (rejestr map) · testMap.ts (Polana Startowa) · zagajnik.ts (Szepczący Zagajnik)
    │  └─ scenes/  BootScene.ts · OverworldScene.ts
-   ├─ services/   creatureService.ts · encounterService.ts · bootService.ts
+   ├─ services/   creatureService.ts · encounterService.ts · evolutionService.ts · updateService.ts · bootService.ts
    ├─ state/      gameStore.ts · uiStore.ts · battleStore.ts
    └─ ui/         components/ (common, CreatureSprite, Controls, Overlays) · screens/ (Title, Starter,
-                  Overworld, Battle) · menus/ (Party, Bag, Atlas, Journal, Shop, Options, LearnMove, ModalHost)
+                  Overworld, Battle) · menus/ (Party, Bag, Atlas, Journal, Shop, Options, LearnMove, Evolution, ModalHost)
                   · styles/global.css
 ```
 

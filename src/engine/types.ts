@@ -1,5 +1,7 @@
 // Typy domenowe wspólne dla silnika, danych i UI. Bez zależności od React/Phaser.
 
+import type { NatureId } from '../config/natures';
+
 export const TYPE_NAMES = [
   'normal',
   'fighting',
@@ -131,6 +133,18 @@ export interface MoveSlot {
   maxPp: number;
 }
 
+/**
+ * Stan ewolucji stworzenia (zapis v3). Anulowana ewolucja przez poziom nie jest proponowana ponownie,
+ * dopóki stworzenie nie awansuje powyżej poziomu anulowania.
+ */
+export interface EvolutionState {
+  cancelledAtLevel: number | null;
+  /** Wariant, z którego stworzenie wyewoluowało (historia; null — nie ewoluowało). */
+  evolvedFrom: string | null;
+}
+
+export const EMPTY_EVOLUTION_STATE: EvolutionState = { cancelledAtLevel: null, evolvedFrom: null };
+
 /** Konkretne stworzenie gracza lub dzikie. */
 export interface Creature {
   uid: string;
@@ -149,11 +163,16 @@ export interface Creature {
   status: MajorStatus | null;
   sleepTurns: number;
   moves: MoveSlot[];
-  ability: string;
+  /** Natura (zapis v3): +10% / −10% do dwóch statystyk albo neutralna. */
+  nature: NatureId;
+  /** Zdolność — identyfikator z PokéAPI; działające zdolności: src/config/abilities.ts. */
+  abilityId: string;
   gender: Gender;
   shiny: boolean;
   mighty: boolean;
-  heldItem: string | null;
+  /** Przedmiot trzymany (ItemId rodzaju „held” z src/config/items.ts) albo brak. */
+  heldItemId: string | null;
+  evolutionState: EvolutionState;
   friendship: number;
   metLevel: number;
   metAt: string;

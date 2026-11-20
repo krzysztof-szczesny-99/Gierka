@@ -42,7 +42,8 @@ export default defineConfig({
             options: {
               cacheName: 'pokeapi-sprites',
               expiration: { maxEntries: 2000, maxAgeSeconds: 60 * 60 * 24 * 90 },
-              cacheableResponse: { statuses: [0, 200] },
+              // Tylko pełne odpowiedzi CORS (status 200): odpowiedź „opaque” (0) nie nadaje się na teksturę WebGL.
+              cacheableResponse: { statuses: [200] },
             },
           },
           // JSON z PokéAPI NIE jest tu buforowany — robi to Dexie (zwięzłe, znormalizowane rekordy).

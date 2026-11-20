@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { NEUTRAL_NATURES } from '../../config/natures';
 import { POLANA_ID, REGION_ID, ZAGAJNIK_ID } from '../../config/world';
 import { resolveSafeEntry } from '../../game/world';
 import { SAVE_VERSION, useGame } from '../../state/gameStore';
@@ -20,14 +21,14 @@ function v1Save() {
   } as Record<string, unknown> & { player: Record<string, unknown> };
 }
 
-describe('migracja zapisu v1 → v2', () => {
-  it('bieżąca wersja formatu to 2', () => {
-    expect(SAVE_VERSION).toBe(2);
+describe('migracja zapisu v1 → v2 (→ bieżąca)', () => {
+  it('bieżąca wersja formatu to 3 (Sprint 4)', () => {
+    expect(SAVE_VERSION).toBe(3);
   });
 
   it('mapId „polana” → region, lokacja Polana Startowa i punkt „start”; pozycja i postęp zachowane', () => {
     const out = migrateSave(v1Save());
-    expect(out.version).toBe(2);
+    expect(out.version).toBe(SAVE_VERSION);
     expect(out.player).toMatchObject({ regionId: REGION_ID, locationId: POLANA_ID, spawnPointId: 'start', x: 30, y: 8, facing: 'left', name: 'Ala', money: 777, steps: 1234 });
     expect('mapId' in out.player).toBe(false);
     expect(out.flags).toEqual({ 'grove-done': true });
@@ -62,9 +63,9 @@ describe('migracja zapisu v1 → v2', () => {
     const p = useGame.getState().player;
     expect(p).toMatchObject({ locationId: POLANA_ID, x: 30, y: 8 });
     expect(resolveSafeEntry(p)).toMatchObject({ locationId: POLANA_ID, x: 30, y: 8 });
-    // Snapshot zapisuje już format v2.
+    // Snapshot zapisuje już bieżący format.
     const snap = useGame.getState().snapshot();
-    expect(snap.version).toBe(2);
+    expect(snap.version).toBe(SAVE_VERSION);
     expect(snap.player.locationId).toBe(POLANA_ID);
   });
 });
@@ -79,5 +80,72 @@ describe('zapis położenia w świecie', () => {
     useGame.getState().resetGame();
     useGame.getState().loadData(migrateSave(JSON.parse(JSON.stringify(snap))));
     expect(useGame.getState().player).toMatchObject({ locationId: ZAGAJNIK_ID, x: 2, y: 9 });
+  });
+});
+
+describe('migracja zapisu v2 → v3 (Sprint 4: natura, zdolność, przedmiot, ewolucja)', () => {
+  /** Stworzenie w formacie v2 (pola `ability` i `heldItem`, bez natury). */
+  const oldCreature = (uid: string, extra: Record<string, unknown> = {}) => ({
+    uid,
+    pokemon: 'pidgey',
+    speciesId: 16,
+    name: 'Pidgey',
+    types: ['normal', 'flying'],
+    level: 9,
+    exp: 600,
+    growthRate: 'medium-slow',
+    ivs: { hp: 1, atk: 2, def: 3, spa: 4, spd: 5, spe: 6 },
+    evs: { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 },
+    stats: { hp: 30, atk: 15, def: 14, spa: 13, spd: 12, spe: 17 },
+    hp: 21,
+    status: null,
+    sleepTurns: 0,
+    moves: [{ name: 'tackle', pp: 30, maxPp: 35 }],
+    ability: 'keen-eye',
+    gender: 'M',
+    shiny: false,
+    mighty: false,
+    heldItem: null,
+    friendship: 70,
+    metLevel: 3,
+    metAt: 'Łąka',
+    caughtAt: 1,
+    ...extra,
+  });
+  const v2 = () => ({
+    ...v1Save(),
+    version: 2,
+    player: { name: 'C', regionId: REGION_ID, locationId: POLANA_ID, spawnPointId: 'start', x: 8, y: 7, facing: 'down' },
+    party: [oldCreature('c-a'), oldCreature('c-b', { heldItem: 'nieznany-przedmiot' })],
+    storage: [oldCreature('c-s', { heldItem: 'trail-leftovers' })],
+  });
+
+  it('ability → abilityId, heldItem → heldItemId (tylko znane przedmioty), natura neutralna, pusty stan ewolucji', () => {
+    const out = migrateSave(v2());
+    expect(out.version).toBe(3);
+    const [a, b] = out.party;
+    expect(a).toMatchObject({ abilityId: 'keen-eye', heldItemId: null, evolutionState: { cancelledAtLevel: null, evolvedFrom: null } });
+    expect('ability' in a).toBe(false);
+    expect('heldItem' in a).toBe(false);
+    expect(NEUTRAL_NATURES).toContain(a.nature);
+    expect(b.heldItemId).toBeNull();
+    expect(out.storage[0].heldItemId).toBe('trail-leftovers');
+  });
+
+  it('statystyki, PŻ, ruchy i doświadczenie starych stworzeń się nie zmieniają', () => {
+    const before = v2().party[0];
+    const after = migrateSave(v2()).party[0];
+    expect(after.stats).toEqual(before.stats);
+    expect([after.hp, after.exp, after.level]).toEqual([before.hp, before.exp, before.level]);
+    expect(after.moves).toEqual(before.moves);
+  });
+
+  it('zapis v1 przechodzi przez v2 do v3; zapis v3 jest stabilny (ponowna migracja nic nie zmienia)', () => {
+    const fromV1 = migrateSave({ ...v1Save(), party: [oldCreature('c-1')] });
+    expect(fromV1.version).toBe(3);
+    expect(fromV1.player.locationId).toBe(POLANA_ID);
+    expect(fromV1.party[0].abilityId).toBe('keen-eye');
+    const again = migrateSave(JSON.parse(JSON.stringify(fromV1)));
+    expect(again).toEqual(fromV1);
   });
 });
