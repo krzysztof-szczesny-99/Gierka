@@ -12,6 +12,7 @@ import { validateWorld } from './game/world';
 import { buildStarter } from './services/creatureService';
 import { configureEncounterDeps } from './services/encounterService';
 import { evolutionInfo, levelEvolutionFor } from './services/evolutionService';
+import { cleanupSpriteCacheOnce } from './services/spriteCache';
 import { checkForUpdate, installUpdateChecks, setUpdateRegistration } from './services/updateService';
 import { useBattle } from './state/battleStore';
 import { useGame } from './state/gameStore';
@@ -49,6 +50,7 @@ window.addEventListener('appinstalled', () => useUi.getState().setInstallPrompt(
 
 // Service worker działa tylko w bezpiecznym kontekście (HTTPS lub localhost).
 if ('serviceWorker' in navigator && window.isSecureContext) {
+  cleanupSpriteCacheOnce();
   registerSW({
     immediate: true,
     // Aplikacja z ekranu głównego bywa tylko wznawiana z tła — sprawdzamy aktualizacje jawnie (updateService).
