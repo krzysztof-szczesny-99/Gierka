@@ -14,11 +14,13 @@ import { createWildBattle } from '../engine/battle/battleEngine';
 import type { BattleEvent, BattleState } from '../engine/battle/types';
 import { displayName } from '../engine/creature';
 import { gameRng, type Rng } from '../engine/rng';
-import type { Dir, GrowthTable, MoveData, PokemonData, TypeChart } from '../engine/types';
+import type { GrowthTable, MoveData, PokemonData, TypeChart } from '../engine/types';
 import { eligibleEntries, encounterTable, methodForTerrain, pickEncounterEntry } from '../game/encounterZones';
 import { bus, type BusEvents, type EncounterOutcome, type StepEncounterSource } from '../game/eventBus';
 import { releaseInput } from '../game/input';
-import { MAPS, TEST_MAP, type StaticEncounterDef } from '../game/maps/testMap';
+import { MAPS } from '../game/maps';
+import type { StaticEncounterDef } from '../game/maps/testMap';
+import { getLocation, healingTarget, startLocation, type WorldPosition } from '../game/world';
 import { useBattle } from '../state/battleStore';
 import { useGame } from '../state/gameStore';
 import { encounterClock, useUi, type EncounterEndReason, type LearnRequest } from '../state/uiStore';
@@ -185,7 +187,7 @@ export async function finishBattle(): Promise<boolean> {
   const outcome: EncounterOutcome = st.outcome ?? 'fled';
   const notes: string[] = [];
   const requests: LearnRequest[] = [];
-  let teleportTo: { x: number; y: number; facing: Dir } | null = null;
+  let returnTo: WorldPosition | null = null;
 
   try {
     // 2) Przetworzenie wyniku.
@@ -217,16 +219,15 @@ export async function finishBattle(): Promise<boolean> {
     // Spotkanie specjalne po wygranej lub złapaniu nie pojawia się ponownie (flaga w istniejącym polu zapisu).
     if ((outcome === 'win' || outcome === 'caught') && meta.staticId) game.setFlag(staticDoneFlag(meta.staticId));
 
-    // Porażka: powrót do Stacji Opieki.
-    const map = MAPS[useGame.getState().player.mapId] ?? TEST_MAP;
+    // Porażka: powrót do punktu leczenia lokacji (model świata) — także na inną mapę.
     const allFainted = !useGame.getState().party.some((c) => c.hp > 0);
     if (outcome === 'lose' || allFainted) {
       const loss = Math.floor(useGame.getState().player.money * RULES.blackoutMoneyLoss);
       game.addMoney(-loss);
       game.healAll();
       game.incStat('blackouts');
-      game.setPosition(map.healReturn.x, map.healReturn.y, map.healReturn.facing);
-      teleportTo = { ...map.healReturn };
+      returnTo = healingTarget(useGame.getState().player.locationId);
+      game.setLocation(returnTo);
       notes.push(`Wracasz pospiesznie do Stacji Opieki. Tracisz ${loss} ${CURRENCY}.`, 'Twoje stworzenia odzyskały siły.');
     }
 
@@ -252,7 +253,7 @@ export async function finishBattle(): Promise<boolean> {
   }
 
   // 3–8) Wspólne zakończenie.
-  concludeEncounter(id, meta.actorId, outcome, 'result', teleportTo);
+  concludeEncounter(id, meta.actorId, outcome, 'result', returnTo);
 
   const ui = useUi.getState();
   const pushLearns = () => {
@@ -282,7 +283,7 @@ function concludeEncounter(
   actorId: string | null,
   outcome: EncounterOutcome,
   reason: EncounterEndReason,
-  teleportTo: { x: number; y: number; facing: Dir } | null,
+  returnTo: WorldPosition | null,
 ): void {
   // 3) Aktualizacja obiektu źródłowego na mapie (usunięcie stworzenia albo odnowienie).
   bus.emit('battle-end', { encounterId, actorId, outcome });
@@ -294,7 +295,8 @@ function concludeEncounter(
   const ui = useUi.getState();
   ui.setTransition(false);
   if (ui.mode === 'battle') ui.setMode('overworld');
-  if (teleportTo) bus.emit('teleport', teleportTo);
+  // Powrót po przegranej: scena przenosi gracza (ta sama mapa) albo przeładowuje się z mapą punktu leczenia.
+  if (returnTo) bus.emit('travel', returnTo);
   // 6) Odnowienie — kilka poprawnych kroków bez nowych spotkań.
   ui.setEncounterCooldown(ENCOUNTER_CONFIG.cooldownSteps);
   // 7) Joystick od zera (palec trzymany przed walką nie porusza postaci).
@@ -308,7 +310,7 @@ function zoneName(zoneId: string | null): string {
     const z = map.zones.find((x) => x.id === zoneId);
     if (z) return z.name;
   }
-  return TEST_MAP.name;
+  return getLocation(useGame.getState().player.locationId)?.name ?? startLocation().name;
 }
 
 export function handleDoor(kind: 'care' | 'shop'): void {

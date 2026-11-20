@@ -9,7 +9,9 @@ import { createRng, createSequenceRng } from '../../engine/rng';
 import type { Creature, MoveData, PokemonData } from '../../engine/types';
 import { bus, type BusEvents, type EncounterSource } from '../../game/eventBus';
 import { joystick, joystickDown, releaseInput, virtualInput } from '../../game/input';
+import { POLANA_ID } from '../../config/world';
 import { TEST_MAP } from '../../game/maps/testMap';
+import { getLocation, spawnPointOf } from '../../game/world';
 import { useBattle } from '../../state/battleStore';
 import { useGame } from '../../state/gameStore';
 import { isOverworldBlocked, useUi } from '../../state/uiStore';
@@ -37,7 +39,7 @@ let moveDelayMs = 0;
 let failTypeChart = false;
 let restoreDeps: () => void = () => undefined;
 let battleEnds: BusEvents['battle-end'][] = [];
-let teleports: BusEvents['teleport'][] = [];
+let travels: BusEvents['travel'][] = [];
 let offs: (() => void)[] = [];
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -99,8 +101,8 @@ beforeEach(() => {
   });
   releaseInput('reset');
   battleEnds = [];
-  teleports = [];
-  offs = [bus.on('battle-end', (p) => battleEnds.push(p)), bus.on('teleport', (p) => teleports.push(p))];
+  travels = [];
+  offs = [bus.on('battle-end', (p) => battleEnds.push(p)), bus.on('travel', (p) => travels.push(p))];
 });
 
 afterEach(() => {
@@ -269,8 +271,11 @@ describe('zakończenie spotkania — każdy wynik przetwarzany dokładnie raz', 
     expect(g.stats.blackouts).toBe(1);
     expect(g.player.money).toBe(900);
     expect(g.party.every((c) => c.hp === c.stats.hp)).toBe(true);
-    expect([g.player.x, g.player.y]).toEqual([TEST_MAP.healReturn.x, TEST_MAP.healReturn.y]);
-    expect(teleports).toHaveLength(1);
+    const heal = spawnPointOf(getLocation(POLANA_ID)!, 'stacja-opieki')!;
+    expect([g.player.x, g.player.y]).toEqual([heal.x, heal.y]);
+    expect(g.player.locationId).toBe(POLANA_ID);
+    expect(travels).toHaveLength(1);
+    expect(travels[0]).toMatchObject({ locationId: POLANA_ID, spawnPointId: 'stacja-opieki', x: heal.x, y: heal.y });
     expectBackToExploration(id, 'lose');
   });
 

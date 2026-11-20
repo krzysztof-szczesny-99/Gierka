@@ -113,6 +113,19 @@ export const ENCOUNTER_TABLES: Record<string, EncounterTable> = {
       { pokemonId: 'dratini', weight: 10, minLevel: 7, maxLevel: 9, encounterMethod: 'grass', rarity: 'very-rare' },
     ],
   },
+  // Szepczący Zagajnik (druga lokacja): leśne stworzenia w paprociach — inna tabela niż na Polanie.
+  zagajnik: {
+    id: 'zagajnik',
+    entries: [
+      { pokemonId: 'caterpie', weight: 12, minLevel: 3, maxLevel: 5, encounterMethod: 'grass', rarity: 'common' },
+      { pokemonId: 'weedle', weight: 12, minLevel: 3, maxLevel: 5, encounterMethod: 'grass', rarity: 'common' },
+      { pokemonId: 'oddish', weight: 10, minLevel: 4, maxLevel: 6, encounterMethod: 'grass', rarity: 'common' },
+      { pokemonId: 'hoothoot', weight: 8, minLevel: 4, maxLevel: 6, encounterMethod: 'grass', rarity: 'uncommon' },
+      { pokemonId: 'seedot', weight: 6, minLevel: 4, maxLevel: 6, encounterMethod: 'grass', rarity: 'uncommon' },
+      { pokemonId: 'skwovet', weight: 6, minLevel: 3, maxLevel: 5, encounterMethod: 'grass', rarity: 'uncommon' },
+      { pokemonId: 'fomantis', weight: 3, minLevel: 5, maxLevel: 7, encounterMethod: 'grass', rarity: 'rare' },
+    ],
+  },
   // Jedyne widoczne stworzenie na mapie: nieruchomy „Strażnik Cichego Gaju” (spotkanie specjalne).
   'grove-guardian': {
     id: 'grove-guardian',

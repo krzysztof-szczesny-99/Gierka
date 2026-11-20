@@ -20,7 +20,9 @@ import {
   terrainAt,
   type StepEncounterState,
 } from '../encounterZones';
+import { POLANA_ID } from '../../config/world';
 import { TEST_MAP } from '../maps/testMap';
+import { getLocation } from '../world';
 import { isWalkable } from '../movement';
 
 const grid = TEST_MAP.layout.map((row) => row.split(''));
@@ -72,8 +74,8 @@ describe('tereny i strefy Polany Startowej', () => {
         if (y <= 16 && isWalkable(grid, x, y)) expect(encounterZoneAt(TEST_MAP, grid, x, y, {})).toBeNull();
       }
     }
-    expect(encounterZoneAt(TEST_MAP, grid, TEST_MAP.spawn.x, TEST_MAP.spawn.y, {})).toBeNull();
-    expect(encounterZoneAt(TEST_MAP, grid, TEST_MAP.healReturn.x, TEST_MAP.healReturn.y, {})).toBeNull();
+    // Wszystkie punkty pojawienia się Polany (start, Stacja Opieki, wejście z Zagajnika) są bezpieczne.
+    for (const sp of getLocation(POLANA_ID)!.spawnPoints) expect(encounterZoneAt(TEST_MAP, grid, sp.x, sp.y, {})).toBeNull();
     // Zwykła trawa wewnątrz prostokąta Łąki też jest bezpieczna.
     const plain = findTile((x, y) => grid[y][x] === '.' && x >= 18 && x < 38 && y >= 2 && y < 13);
     expect(encounterZoneAt(TEST_MAP, grid, plain.x, plain.y, {})).toBeNull();
