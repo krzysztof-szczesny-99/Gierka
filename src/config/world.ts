@@ -14,13 +14,17 @@ export const LOCATION_STATUSES: readonly LocationStatus[] = ['IMPLEMENTED', 'DAT
 export const LOCATION_TYPES: readonly LocationType[] = ['TOWN', 'CITY', 'ROUTE', 'FOREST', 'CAVE', 'WATER', 'BUILDING', 'CHALLENGE', 'SPECIAL'];
 
 /**
- * Wymagania (połączenia, lokacji, regionu). Sprawdzane na zapisie gry:
- * odznaki — lista zdobytych odznak (earnedBadges, Sprint 6), przedmioty — torba, wydarzenia — flagi o podanej nazwie.
+ * Wymagania (połączenia, lokacji, regionu, wejścia do ukrytej lokacji). Sprawdzane na zapisie gry:
+ * odznaki — lista zdobytych odznak (earnedBadges, Sprint 6), przedmioty — torba, wydarzenia — flagi o podanej nazwie,
+ * Próby — ukończone Próby Szlaku (completedChallenges), odkrycia — odkryte ukryte lokacje (Sprint 7, flaga
+ * discoveryEventId z src/config/hiddenLocations.ts). Wszystkie podane warunki muszą być spełnione jednocześnie.
  */
 export interface Requirements {
   badges?: string[];
   items?: string[];
   events?: string[];
+  challenges?: string[];
+  discoveries?: string[];
 }
 
 export interface SpawnPoint {
@@ -107,6 +111,7 @@ export const POLANA_ID = 'polana-startowa';
 export const ZAGAJNIK_ID = 'szepczacy-zagajnik';
 export const WZGORZA_ID = 'wzgorza-wiatru';
 export const STRAZNICA_ID = 'wietrzna-straznica';
+export const GROTA_ID = 'grota-echa';
 export const REGION_ID = 'kraina-szlakow';
 
 const HEAL_AT_POLANA: HealingPoint = { locationId: POLANA_ID, spawnPointId: 'stacja-opieki' };
@@ -119,7 +124,7 @@ export const WORLD: WorldDef = {
       name: 'Kraina Szlaków',
       generationReference: 'mixed',
       startLocationId: POLANA_ID,
-      locationIds: [POLANA_ID, ZAGAJNIK_ID, WZGORZA_ID, STRAZNICA_ID],
+      locationIds: [POLANA_ID, ZAGAJNIK_ID, WZGORZA_ID, STRAZNICA_ID, GROTA_ID],
       unlockRequirements: {},
       status: 'IMPLEMENTED',
     },
@@ -147,7 +152,7 @@ export const WORLD: WorldDef = {
           blockedMessage: ['Ścieżka do Szepczącego Zagajnika jest na razie zamknięta.'],
         },
       ],
-      encounterTableIds: ['meadow', 'pond', 'rocks', 'grove', 'grove-guardian'],
+      encounterTableIds: ['meadow', 'pond', 'rocks', 'grove'],
       availableEncounterMethods: ['grass', 'cave', 'static'],
       requiredBadges: [],
       requiredItems: [],
@@ -219,6 +224,8 @@ export const WORLD: WorldDef = {
       spawnPoints: [
         { id: DEFAULT_SPAWN_POINT_ID, x: 11, y: 13, facing: 'up' },
         { id: 'z-zagajnika', x: 11, y: 14, facing: 'up' },
+        // Przy głazie z ukrytym wejściem do Groty Echa (Sprint 7) — powrót z groty.
+        { id: 'z-groty', x: 8, y: 8, facing: 'right' },
       ],
       connections: [
         {
@@ -266,6 +273,36 @@ export const WORLD: WorldDef = {
       requiredItems: [],
       requiredEvents: [],
       hidden: false,
+      healingPoint: HEAL_AT_POLANA,
+    },
+    {
+      // Ukryta lokacja (Sprint 7): wejście — szczelina w głazie na Wzgórzach Wiatru (src/config/hiddenLocations.ts).
+      id: GROTA_ID,
+      name: 'Grota Echa',
+      regionId: REGION_ID,
+      type: 'CAVE',
+      status: 'IMPLEMENTED',
+      mapReference: 'grota',
+      spawnPoints: [
+        { id: DEFAULT_SPAWN_POINT_ID, x: 7, y: 9, facing: 'up' },
+        { id: 'z-wzgorz', x: 7, y: 10, facing: 'up' },
+      ],
+      connections: [
+        {
+          id: 'grota-do-wzgorz',
+          sourceLocationId: GROTA_ID,
+          destinationLocationId: WZGORZA_ID,
+          sourceTrigger: { kind: 'tile', x: 7, y: 11 },
+          destinationSpawnPoint: 'z-groty',
+          blockedMessage: ['Wyjście z groty jest na razie zasypane.'],
+        },
+      ],
+      encounterTableIds: [],
+      availableEncounterMethods: ['static'],
+      requiredBadges: [],
+      requiredItems: [],
+      requiredEvents: [],
+      hidden: true,
       healingPoint: HEAL_AT_POLANA,
     },
   ],

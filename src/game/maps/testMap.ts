@@ -1,9 +1,10 @@
 // Oryginalna mapa „Polana Startowa” (40×32 kafelki) — lokacja startowa Krainy Szlaków (id lokacji: polana-startowa).
-// Punkty pojawienia się, połączenia i punkt leczenia są w modelu świata (src/config/world.ts).
+// Punkty pojawienia się, połączenia i punkt leczenia są w modelu świata (src/config/world.ts); spotkania specjalne
+// (np. Strażnik Cichego Gaju) — w src/config/specialEncounters.ts.
 // Legenda: T drzewo · . trawa · , wysoka trawa · = ścieżka · ~ woda · s piasek · r skalisty grunt · R głaz
 //          f kwiaty · F płot · S tabliczka · C/c Stacja Opieki · M/m Kram · w ściana · D/E drzwi
 
-import { ENCOUNTER_CONFIG, staticDoneFlag, type EncounterConditions, type TerrainType } from '../../config/encounters';
+import { ENCOUNTER_CONFIG, type EncounterConditions, type TerrainType } from '../../config/encounters';
 import { POLANA_ID } from '../../config/world';
 
 /**
@@ -25,26 +26,11 @@ export interface ZoneDef {
   conditions?: EncounterConditions;
 }
 
-/** Spotkanie specjalne: jedyny rodzaj stworzenia widocznego na mapie — stoi w miejscu, nie wędruje i nie goni. */
-export interface StaticEncounterDef {
-  id: string;
-  name: string;
-  x: number;
-  y: number;
-  locationId: string;
-  /** Strefa, do której należy (nazwa w Atlasie/„spotkano w”, flagi strefy). */
-  zoneId: string;
-  terrainType: 'SPECIAL';
-  encounterTableId: string;
-  conditions?: EncounterConditions;
-}
-
 export interface MapDef {
   id: string;
   name: string;
   layout: string[];
   zones: ZoneDef[];
-  staticEncounters: StaticEncounterDef[];
   signs: Record<string, string[]>;
   doors: Record<string, 'care' | 'shop'>;
 }
@@ -128,19 +114,6 @@ export const TEST_MAP: MapDef = {
       encounterTableId: 'grove',
       baseEncounterRate: ENCOUNTER_CONFIG.baseRates.TALL_GRASS,
       stepDistance: ENCOUNTER_CONFIG.defaultStepDistance,
-    },
-  ],
-  staticEncounters: [
-    {
-      id: 'gaj-straznik',
-      name: 'Strażnik Cichego Gaju',
-      x: 36,
-      y: 28,
-      locationId: POLANA_ID,
-      zoneId: 'grove',
-      terrainType: 'SPECIAL',
-      encounterTableId: 'grove-guardian',
-      conditions: { flagsNone: [staticDoneFlag('gaj-straznik')] },
     },
   ],
   signs: {

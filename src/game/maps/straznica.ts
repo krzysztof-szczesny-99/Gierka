@@ -26,7 +26,6 @@ export const STRAZNICA_MAP: MapDef = {
     'TTTTTTTTTTTTTTTTTT',
   ],
   zones: [],
-  staticEncounters: [],
   signs: {
     '6,10': [
       'Wietrzna Strażnica — Próba Wiatru.',

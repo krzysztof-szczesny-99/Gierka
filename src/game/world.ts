@@ -3,6 +3,7 @@
 
 import { ENCOUNTER_TABLES, TERRAIN_METHOD, type EncounterTable } from '../config/encounters';
 import { BADGES } from '../config/challenges';
+import { HIDDEN_LOCATIONS } from '../config/hiddenLocations';
 import { ITEMS } from '../config/items';
 import {
   DEFAULT_SPAWN_POINT_ID,
@@ -20,6 +21,13 @@ import type { Dir } from '../engine/types';
 import { MAPS } from './maps';
 import type { MapDef } from './maps/testMap';
 import { isWalkable } from './movement';
+
+/** Ukryte wejścia (Sprint 7): lokacja nadrzędna → ukryta lokacja (do osiągalności i dróg powrotnych w walidacji). */
+export interface HiddenEdge {
+  from: string;
+  to: string;
+}
+const HIDDEN_EDGES: readonly HiddenEdge[] = HIDDEN_LOCATIONS.filter((h) => h.status === 'IMPLEMENTED').map((h) => ({ from: h.parentLocationId, to: h.id }));
 
 /** Przejścia otwierane przez odznaki (efekty UNLOCK_CONNECTION). */
 const UNLOCKABLE_CONNECTIONS: ReadonlySet<string> = new Set(BADGES.flatMap((b) => b.unlockEffects.map((e) => e.connectionId)));
@@ -42,6 +50,8 @@ export interface ProgressState {
   earnedBadges?: readonly string[];
   /** Odblokowane przejścia (LocationConnection.locked) — zapis v4, Sprint 6. */
   unlockedConnections?: readonly string[];
+  /** Ukończone Próby Szlaku (zapis v4, Sprint 6) — wymaganie `challenges`. */
+  completedChallenges?: readonly string[];
 }
 
 export function getRegion(id: string, world: WorldDef = WORLD): RegionDef | null {
@@ -100,7 +110,15 @@ export function requirementsMet(req: Requirements | undefined, state: ProgressSt
   if (req.badges?.some((b) => !(state.earnedBadges ?? []).includes(b))) return false;
   if (req.items?.some((i) => !((state.bag[i] ?? 0) > 0))) return false;
   if (req.events?.some((e) => !state.flags[e])) return false;
+  if (req.challenges?.some((c) => !(state.completedChallenges ?? []).includes(c))) return false;
+  if (req.discoveries?.some((id) => !isDiscoveredLocation(id, state.flags))) return false;
   return true;
+}
+
+/** Czy ukryta lokacja została odkryta (flaga discoveryEventId). Nieznana ukryta lokacja — nieodkryta. */
+export function isDiscoveredLocation(hiddenLocationId: string, flags: Readonly<Record<string, boolean>>): boolean {
+  const h = HIDDEN_LOCATIONS.find((x) => x.id === hiddenLocationId);
+  return !!h && !!flags[h.discoveryEventId];
 }
 
 /** Czy zamknięte przejście zostało już otwarte (efektem odznaki). Przejście bez `locked` jest zawsze otwarte. */
@@ -213,6 +231,8 @@ export function validateWorld(
   tables: Readonly<Record<string, EncounterTable>> = ENCOUNTER_TABLES,
   /** Zamknięte przejścia, które da się otworzyć w grze (efekty odznak) — liczą się do osiągalności lokacji. */
   unlockable: ReadonlySet<string> = UNLOCKABLE_CONNECTIONS,
+  /** Ukryte wejścia (Sprint 7) — prowadzą do ukrytych lokacji i są ich drogą powrotną. */
+  hiddenEdges: readonly HiddenEdge[] = HIDDEN_EDGES,
 ): WorldIssue[] {
   const issues: WorldIssue[] = [];
   const add = (code: WorldIssueCode, ref: string, message: string) => issues.push({ code, ref, message });
@@ -291,10 +311,6 @@ export function validateWorld(
       const method = TERRAIN_METHOD[z.terrainType];
       if (method && !l.availableEncounterMethods.includes(method)) add('INVALID_ENCOUNTER_SETUP', z.id, `Metoda „${method}” nie jest dostępna w lokacji.`);
     }
-    for (const s of map.staticEncounters) {
-      if (!tables[s.encounterTableId]) add('MISSING_ENCOUNTER_TABLE', s.id, `Brak tabeli spotkań „${s.encounterTableId}”.`);
-      else if (!l.encounterTableIds.includes(s.encounterTableId)) add('INVALID_ENCOUNTER_SETUP', s.id, `Tabela „${s.encounterTableId}” nie jest przypisana do lokacji.`);
-    }
 
     for (const c of l.connections) {
       const ref = `${l.id}:${c.id}`;
@@ -320,7 +336,7 @@ export function validateWorld(
       if (dest.status !== 'IMPLEMENTED') continue; // przejście zablokowane z komunikatem — mapa jeszcze nie istnieje
       const destMap = mapOf(dest, maps);
       if (!destMap) continue; // zgłoszone przy lokacji docelowej
-      const back = dest.connections.find((b) => b.destinationLocationId === l.id);
+      const back = dest.connections.find((b) => b.destinationLocationId === l.id) ?? hiddenEdges.find((e) => e.from === dest.id && e.to === l.id);
       if (!back) add('INVALID_CONNECTION', ref, `Brak drogi powrotnej z „${dest.id}” do „${l.id}”.`);
     }
   }
@@ -336,6 +352,12 @@ export function validateWorld(
         const d = getLocation(c.destinationLocationId, world);
         if (!d || d.status !== 'IMPLEMENTED' || reached.has(d.id) || !requirementsMet(c.requirements, { flags: {}, bag: {} })) continue;
         if (c.locked && !unlockable.has(c.id)) continue;
+        reached.add(d.id);
+        queue.push(d.id);
+      }
+      for (const e of hiddenEdges) {
+        const d = getLocation(e.to, world);
+        if (e.from !== cur?.id || !d || d.status !== 'IMPLEMENTED' || reached.has(d.id)) continue;
         reached.add(d.id);
         queue.push(d.id);
       }

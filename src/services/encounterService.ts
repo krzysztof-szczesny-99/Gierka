@@ -21,14 +21,15 @@ import { eligibleEntries, encounterTable, methodForTerrain, pickEncounterEntry }
 import { bus, type BusEvents, type EncounterOutcome, type StepEncounterSource } from '../game/eventBus';
 import { releaseInput } from '../game/input';
 import { MAPS } from '../game/maps';
-import type { StaticEncounterDef } from '../game/maps/testMap';
 import { getLocation, healingTarget, startLocation, type WorldPosition } from '../game/world';
 import { useBattle } from '../state/battleStore';
 import { useGame } from '../state/gameStore';
 import { encounterClock, useUi, type EncounterEndReason, type EvolutionRequest, type LearnRequest } from '../state/uiStore';
-import { buildTrainerCreature, buildWild, dexInfo, errorMessage, loadMovesSafe, type CreatureBundle, type WildSpawn } from './creatureService';
+import { buildSpecial, buildTrainerCreature, buildWild, dexInfo, errorMessage, loadMovesSafe, type CreatureBundle, type WildSpawn } from './creatureService';
+import type { SpecialEncounterDef } from '../config/specialEncounters';
 import { getTrainer, isDefeated } from '../game/trainers';
 import { challengeState, getChallenge } from '../game/challenges';
+import { getSpecialEncounter } from '../game/specialEncounters';
 import { WORLD } from '../config/world';
 import { pendingLevelEvolutions } from './evolutionService';
 import type { Creature } from '../engine/types';
@@ -112,12 +113,11 @@ export async function buildStepSpawnFromTable(source: StepEncounterSource, rng: 
   return buildWild(entry, table, { id: source.zoneId, name: source.zoneName }, rng);
 }
 
-/** Stworzenie dla spotkania specjalnego (wpis „static” z jego tabeli). */
-export async function buildStaticSpawn(def: StaticEncounterDef, zoneName: string): Promise<WildSpawn> {
-  const table = encounterTable(def.encounterTableId);
-  const entry = pickEncounterEntry(eligibleEntries(table, 'static', useGame.getState().flags), deps.rng);
-  return buildWild(entry, table, { id: def.zoneId, name: zoneName }, deps.rng);
+/** Stworzenie spotkania specjalnego (Sprint 7: gatunek i poziom z danych spotkania). */
+export async function buildSpecialSpawn(def: SpecialEncounterDef, zoneName: string): Promise<WildSpawn> {
+  return buildSpecial(def, { id: def.zoneId ?? def.locationId, name: zoneName }, deps.rng);
 }
+
 function isStarting(encounterId: string): boolean {
   const u = useUi.getState();
   return u.activeEncounterId === encounterId && u.gameMode === 'ENCOUNTER_STARTING';
@@ -368,8 +368,12 @@ export async function finishBattle(): Promise<boolean> {
     }
     if (outcome !== 'win' && meta.trainerId) applyTrainerResult(st, meta.trainerId, !!meta.rematch, outcome, meta.trainerSpecies ?? {}, notes);
     if ((outcome === 'win' || outcome === 'caught') && meta.zoneId === 'grove') game.setFlag('grove-done');
-    // Spotkanie specjalne po wygranej lub złapaniu nie pojawia się ponownie (flaga w istniejącym polu zapisu).
-    if ((outcome === 'win' || outcome === 'caught') && meta.staticId) game.setFlag(staticDoneFlag(meta.staticId));
+    // Spotkanie specjalne: wynik w zapisie i stan zgodny z danymi spotkania (np. po złapaniu/pokonaniu znika na stałe —
+    // wydarzenie ukończenia; ucieczka — według polityki powtórzeń). Nieznane spotkanie (dawny model): jak w Sprincie 2.
+    if (meta.staticId) {
+      if (getSpecialEncounter(meta.staticId)) game.recordSpecialEncounter(meta.staticId, outcome);
+      else if (outcome === 'win' || outcome === 'caught') game.setFlag(staticDoneFlag(meta.staticId));
+    }
 
     // Porażka: powrót do punktu leczenia lokacji (model świata) — także na inną mapę.
     const allFainted = !useGame.getState().party.some((c) => c.hp > 0);

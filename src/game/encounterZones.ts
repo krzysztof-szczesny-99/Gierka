@@ -11,7 +11,7 @@ import {
   type TerrainType,
 } from '../config/encounters';
 import type { Rng } from '../engine/rng';
-import type { MapDef, StaticEncounterDef, ZoneDef } from './maps/testMap';
+import type { MapDef, ZoneDef } from './maps/testMap';
 import { charAt, inBounds } from './movement';
 import { tileDef } from './tiles';
 
@@ -44,11 +44,6 @@ export function encounterZoneAt(
   const terrain = terrainAt(grid, x, y);
   if (terrain === 'NONE' || terrain === 'SPECIAL') return null;
   return map.zones.find((z) => z.terrainType === terrain && inRect(z, x, y) && conditionsMet(z.conditions, flags)) ?? null;
-}
-
-/** Spotkania specjalne, które powinny być widoczne na mapie (warunki spełnione, np. jeszcze nie pokonane). */
-export function activeStaticEncounters(map: Pick<MapDef, 'staticEncounters'>, flags: Readonly<Record<string, boolean>>): StaticEncounterDef[] {
-  return map.staticEncounters.filter((s) => conditionsMet(s.conditions, flags));
 }
 
 // ───────────────────────────── losowanie po kroku ─────────────────────────────

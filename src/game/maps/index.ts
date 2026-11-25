@@ -1,5 +1,6 @@
 // Rejestr grywalnych map (klucz = LocationDef.mapReference w src/config/world.ts).
 
+import { GROTA_MAP } from './grota';
 import { TEST_MAP, type MapDef } from './testMap';
 import { STRAZNICA_MAP } from './straznica';
 import { WZGORZA_MAP } from './wzgorza';
@@ -10,4 +11,5 @@ export const MAPS: Readonly<Record<string, MapDef>> = {
   [ZAGAJNIK_MAP.id]: ZAGAJNIK_MAP,
   [WZGORZA_MAP.id]: WZGORZA_MAP,
   [STRAZNICA_MAP.id]: STRAZNICA_MAP,
+  [GROTA_MAP.id]: GROTA_MAP,
 };

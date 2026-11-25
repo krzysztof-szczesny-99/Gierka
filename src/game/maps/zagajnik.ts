@@ -43,7 +43,6 @@ export const ZAGAJNIK_MAP: MapDef = {
       stepDistance: ENCOUNTER_CONFIG.defaultStepDistance,
     },
   ],
-  staticEncounters: [],
   signs: {
     '3,10': ['Szepczący Zagajnik.', 'W paprociach szeleszczą leśne stworzenia. Ścieżką na zachód wrócisz na Polanę Startową.'],
     '12,7': ['Na północ: Wzgórza Wiatru.', 'Uwaga: za zakrętem drogę zagradza zwalone drzewo.'],

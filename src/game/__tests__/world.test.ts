@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ENCOUNTER_TABLES } from '../../config/encounters';
-import { POLANA_ID, REGION_ID, STRAZNICA_ID, WORLD, WZGORZA_ID, ZAGAJNIK_ID, type LocationDef, type WorldDef } from '../../config/world';
+import { GROTA_ID, POLANA_ID, REGION_ID, STRAZNICA_ID, WORLD, WZGORZA_ID, ZAGAJNIK_ID, type LocationDef, type WorldDef } from '../../config/world';
 import { encounterZoneAt } from '../encounterZones';
 import { MAPS } from '../maps';
 import { isWalkable } from '../movement';
@@ -52,7 +52,7 @@ describe('model świata: dane', () => {
   it('region i lokacje mają wymagane pola; Polana Startowa ma stabilny identyfikator', () => {
     const region = getRegion(REGION_ID)!;
     expect(region).toMatchObject({ startLocationId: POLANA_ID, status: 'IMPLEMENTED', generationReference: 'mixed' });
-    expect(region.locationIds).toEqual([POLANA_ID, ZAGAJNIK_ID, WZGORZA_ID, STRAZNICA_ID]);
+    expect(region.locationIds).toEqual([POLANA_ID, ZAGAJNIK_ID, WZGORZA_ID, STRAZNICA_ID, GROTA_ID]);
     expect(POLANA_ID).toBe('polana-startowa');
     for (const l of WORLD.locations) {
       for (const key of ['id', 'name', 'regionId', 'type', 'status', 'mapReference', 'connections', 'spawnPoints', 'encounterTableIds', 'availableEncounterMethods', 'requiredBadges', 'requiredItems', 'requiredEvents', 'hidden', 'healingPoint']) {
@@ -60,7 +60,9 @@ describe('model świata: dane', () => {
       }
     }
     // Sprint 6: Wzgórza Wiatru (za zamkniętym przejściem) i Wietrzna Strażnica (lokacja Próby) są grywalne.
-    expect(WORLD.locations.filter((l) => l.status === 'IMPLEMENTED').map((l) => l.id)).toEqual([POLANA_ID, ZAGAJNIK_ID, WZGORZA_ID, STRAZNICA_ID]);
+    // Sprint 7: Grota Echa — ukryta lokacja (hidden: true, wejście przez ukryte wejście na Wzgórzach).
+    expect(WORLD.locations.filter((l) => l.status === 'IMPLEMENTED').map((l) => l.id)).toEqual([POLANA_ID, ZAGAJNIK_ID, WZGORZA_ID, STRAZNICA_ID, GROTA_ID]);
+    expect(WORLD.locations.filter((l) => l.hidden).map((l) => l.id)).toEqual([GROTA_ID]);
     expect(getLocation(STRAZNICA_ID)).toMatchObject({ type: 'CHALLENGE', encounterTableIds: [], mapReference: 'straznica' });
     expect(startPosition()).toMatchObject({ regionId: REGION_ID, locationId: POLANA_ID, spawnPointId: 'start', x: 8, y: 7 });
   });

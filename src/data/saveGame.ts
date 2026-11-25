@@ -77,6 +77,7 @@ export function installAutosave(): void {
       state.earnedBadges !== prev.earnedBadges ||
       state.completedChallenges !== prev.completedChallenges ||
       state.unlockedConnections !== prev.unlockedConnections ||
+      state.specialEncounters !== prev.specialEncounters ||
       state.settings !== prev.settings
     ) {
       scheduleSave();

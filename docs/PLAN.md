@@ -132,12 +132,12 @@ szlaki-dziczy/
    ├─ main.tsx · App.tsx · vite-env.d.ts
    ├─ api/        pokeapi.ts (kolejka, retry, offline) · raw.ts (typy API) · normalize.ts
    ├─ data/       db.ts (Dexie) · repository.ts (bufor pamięć→IndexedDB→API) · saveGame.ts (zapis/autozapis) · migrations.ts (wersje zapisu)
-   ├─ config/     rules.ts · items.ts (także przedmioty trzymane i kamienie) · natures.ts · abilities.ts · encounters.ts · world.ts (regiony, lokacje, połączenia, zamknięte przejścia) · trainers.ts (trenerzy) · challenges.ts (Próby Szlaku, liderzy, odznaki) · quests.ts · moveOverrides.ts · text.ts
+   ├─ config/     rules.ts · items.ts (także przedmioty trzymane i kamienie) · natures.ts · abilities.ts · encounters.ts · world.ts (regiony, lokacje, połączenia, zamknięte przejścia) · trainers.ts (trenerzy) · challenges.ts (Próby Szlaku, liderzy, odznaki) · hiddenLocations.ts (ukryte lokacje) · specialEncounters.ts (spotkania specjalne, lista legendarnych/mitycznych) · quests.ts · moveOverrides.ts · text.ts
    ├─ engine/     types.ts · rng.ts · stats.ts (z naturą) · typeChart.ts · experience.ts · moves.ts · creature.ts · evolution.ts
    │  ├─ battle/  types.ts · damage.ts · status.ts · catch.ts · ai.ts (profile BASIC/BALANCED/AGGRESSIVE, zmiana stworzenia) · effects.ts (zdolności i przedmioty) · battleEngine.ts (walka z dzikim i z trenerem)
    │  └─ __tests__/ engine.test.ts · fixtures.ts
-   ├─ game/       PhaserGame.tsx · eventBus.ts · input.ts (joystick) · movement.ts (reguły ruchu) · encounterZones.ts (tereny i losowanie) · world.ts (przejścia, wymagania, bezpieczne wejście, walidacja świata) · trainers.ts (wzrok, podejście, wydarzenia, walidacja trenerów) · challenges.ts (stan Próby, odznaka raz, odblokowania, walidacja) · tiles.ts · art.ts · textures.ts
-   │  ├─ maps/    index.ts (rejestr map) · testMap.ts (Polana Startowa) · zagajnik.ts (Szepczący Zagajnik) · straznica.ts (Wietrzna Strażnica — Próba Wiatru) · wzgorza.ts (Wzgórza Wiatru)
+   ├─ game/       PhaserGame.tsx · eventBus.ts · input.ts (joystick) · movement.ts (reguły ruchu) · encounterZones.ts (tereny i losowanie) · world.ts (przejścia, wymagania, bezpieczne wejście, walidacja świata) · trainers.ts (wzrok, podejście, wydarzenia, walidacja trenerów) · challenges.ts (stan Próby, odznaka raz, odblokowania, walidacja) · hiddenLocations.ts (wejście, wymagania, odkrycie, walidacja) · specialEncounters.ts (stany po wyniku, zapis wyniku, walidacja) · tiles.ts · art.ts · textures.ts
+   │  ├─ maps/    index.ts (rejestr map) · testMap.ts (Polana Startowa) · zagajnik.ts (Szepczący Zagajnik) · straznica.ts (Wietrzna Strażnica — Próba Wiatru) · wzgorza.ts (Wzgórza Wiatru) · grota.ts (Grota Echa — ukryta)
    │  └─ scenes/  BootScene.ts · OverworldScene.ts
    ├─ services/   creatureService.ts · encounterService.ts · evolutionService.ts · updateService.ts · bootService.ts
    ├─ state/      gameStore.ts · uiStore.ts · battleStore.ts

@@ -9,7 +9,6 @@ import {
 } from '../../config/encounters';
 import { createRng, createSequenceRng, rngFromNext, type Rng } from '../../engine/rng';
 import {
-  activeStaticEncounters,
   assertAllowedSpecies,
   conditionsMet,
   eligibleEntries,
@@ -21,6 +20,7 @@ import {
   type StepEncounterState,
 } from '../encounterZones';
 import { POLANA_ID } from '../../config/world';
+import { activeSpecialEncounters, getSpecialEncounter } from '../specialEncounters';
 import { TEST_MAP } from '../maps/testMap';
 import { getLocation } from '../world';
 import { isWalkable } from '../movement';
@@ -290,19 +290,20 @@ describe('tabele spotkań', () => {
 
 describe('spotkanie specjalne (statyczne)', () => {
   it('Strażnik Cichego Gaju stoi na wolnym polu w Gaju i znika po ustawieniu flagi', () => {
-    const [guard] = TEST_MAP.staticEncounters;
-    expect(guard.terrainType).toBe('SPECIAL');
-    expect(isWalkable(grid, guard.x, guard.y)).toBe(true);
+    // Sprint 7: model spotkania specjalnego (src/config/specialEncounters.ts) zamiast danych mapy i tabeli.
+    const guard = getSpecialEncounter('gaj-straznik')!;
+    expect(guard).toMatchObject({ pokemonId: 'growlithe', level: 8, mighty: true, locationId: POLANA_ID, zoneId: 'grove', completionEventId: staticDoneFlag('gaj-straznik') });
+    expect(isWalkable(grid, guard.position.x, guard.position.y)).toBe(true);
     expect(TEST_MAP.zones.find((z) => z.id === guard.zoneId)?.name).toBe('Cichy Gaj');
-    expect(eligibleEntries(ENCOUNTER_TABLES[guard.encounterTableId], 'static', {})).toHaveLength(1);
-    expect(activeStaticEncounters(TEST_MAP, {}).map((s) => s.id)).toEqual(['gaj-straznik']);
-    expect(activeStaticEncounters(TEST_MAP, { [staticDoneFlag('gaj-straznik')]: true })).toHaveLength(0);
+    const progress = (flags: Record<string, boolean>) => ({ flags, bag: {} });
+    expect(activeSpecialEncounters(POLANA_ID, progress({})).map((s) => s.id)).toEqual(['gaj-straznik']);
+    expect(activeSpecialEncounters(POLANA_ID, progress({ [staticDoneFlag('gaj-straznik')]: true }))).toHaveLength(0);
   });
 
   it('pole stworzenia specjalnego nie losuje spotkań (teren SPECIAL, szansa 0)', () => {
     expect(ENCOUNTER_CONFIG.baseRates.SPECIAL).toBe(0);
     expect(TERRAIN_METHOD.SPECIAL).toBe('static');
-    // Zwykłe tabele nie mają wpisów „static”, a tabela strażnika ma tylko je.
-    for (const id of ['meadow', 'pond', 'rocks', 'grove']) expect(eligibleEntries(ENCOUNTER_TABLES[id], 'static', {})).toHaveLength(0);
+    // Zwykłe tabele nie mają wpisów „static” (spotkania specjalne mają własny model — Sprint 7).
+    for (const t of Object.values(ENCOUNTER_TABLES)) expect(eligibleEntries(t, 'static', {})).toHaveLength(0);
   });
 });

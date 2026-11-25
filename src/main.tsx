@@ -13,6 +13,10 @@ import { TRAINERS } from './config/trainers';
 import { validateTrainers } from './game/trainers';
 import { BADGES, CHALLENGES } from './config/challenges';
 import { validateChallenges } from './game/challenges';
+import { HIDDEN_LOCATIONS } from './config/hiddenLocations';
+import { SPECIAL_ENCOUNTERS } from './config/specialEncounters';
+import { validateHiddenLocations } from './game/hiddenLocations';
+import { validateSpecialEncounters } from './game/specialEncounters';
 import { buildStarter } from './services/creatureService';
 import { configureEncounterDeps } from './services/encounterService';
 import { evolutionInfo, levelEvolutionFor } from './services/evolutionService';
@@ -44,6 +48,7 @@ expose('update', { checkForUpdate, forceUpdate });
 expose('world', { WORLD, validateWorld });
 expose('trainers', { TRAINERS, validateTrainers });
 expose('challenges', { CHALLENGES, BADGES, validateChallenges });
+expose('hidden', { HIDDEN_LOCATIONS, SPECIAL_ENCOUNTERS, validateHiddenLocations, validateSpecialEncounters });
 // Scenariusze E2E (tylko ?debug): budowanie stworzenia z danych PokéAPI i stan ewolucji.
 expose('creatures', { buildStarter, evolutionInfo, levelEvolutionFor, getGrowth, NATURES, rng: gameRng });
 
@@ -55,6 +60,8 @@ if (DEBUG) {
   if (trainerIssues.length) console.error('Błędy w danych trenerów:', trainerIssues);
   const challengeIssues = validateChallenges();
   if (challengeIssues.length) console.error('Błędy w danych Prób Szlaku:', challengeIssues);
+  const hiddenIssues = [...validateHiddenLocations(), ...validateSpecialEncounters()];
+  if (hiddenIssues.length) console.error('Błędy w danych ukrytych lokacji i spotkań specjalnych:', hiddenIssues);
 }
 // Kontrolowane źródło losowości spotkań dla testów E2E (tylko ?debug).
 expose('encounter', { configure: configureEncounterDeps, createRng, createSequenceRng, rngFromNext, seed });
