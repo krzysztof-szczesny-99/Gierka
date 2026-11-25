@@ -966,7 +966,7 @@ try {
   const resaved = await idbSave();
   const creatureOk = stored?.stworzenie?.ability && stored.stworzenie.abilityId === null && lead9.abilityId === stored.stworzenie.ability && lead9.neutralna && JSON.stringify(lead9.stats) === JSON.stringify(stored.stworzenie.stats) && lead9.evolutionState?.cancelledAtLevel === null && resaved?.stworzenie?.ability === null && resaved?.stworzenie?.nature === lead9.nature;
   const ok = stored?.wersjaDanych === 1 && stored?.mapId === 'polana' && same(stored.poz, [spot.x, spot.y]) && p.region === REGION && p.lokacja === POLANA && p.punkt === 'start' && same(p.zapisPoz, [spot.x, spot.y]) && same(p.poz, [spot.x, spot.y]) && money === 4321 && restored.ruszyl && resaved?.wersjaDanych === SAVE_V && resaved?.wersjaWiersza === SAVE_V && resaved?.lokacja === POLANA && resaved?.mapId === null && creatureOk;
-  record('W9', 'Stary zapis v1 (mapId, stworzenia bez natury) z IndexedDB: migracja do v3 — Polana, pozycja, pieniądze; natura neutralna, zdolność zachowana, statystyki bez zmian', ok, { pozycjaV1: spot, zapisV1: stored, poWczytaniu: p, pieniadze: money, prowadzacy: lead9, zapisPoMigracji: resaved, sterowanie: restored });
+  record('W9', 'Stary zapis v1 (mapId, stworzenia bez natury) z IndexedDB: migracja do bieżącej wersji (v4) — Polana, pozycja, pieniądze; natura neutralna, zdolność zachowana, statystyki bez zmian', ok, { pozycjaV1: spot, zapisV1: stored, poWczytaniu: p, pieniadze: money, prowadzacy: lead9, zapisPoMigracji: resaved, sterowanie: restored });
 } catch (e) { fail('W9', 'Migracja zapisu v1', e); }
 
 
@@ -1252,7 +1252,7 @@ try {
   const resaved = await idbSave();
   const src = v2.party;
   const ok = stored?.wersjaDanych === 2 && after.length === src.length && after.every((c, i) => c.pokemon === src[i].pokemon && c.neutralna && c.abilityId === src[i].ability && c.heldItemId === src[i].heldItem && JSON.stringify(c.stats) === JSON.stringify(src[i].stats) && c.evolutionState && c.evolutionState.cancelledAtLevel === null) && restored.ruszyl && resaved?.wersjaDanych === SAVE_V && resaved?.stworzenie?.ability === null && resaved?.stworzenie?.nature;
-  record('E7', 'Stary zapis v2 z IndexedDB: stworzenia dostają naturę neutralną, zdolność i przedmiot zachowane, statystyki bez zmian; ponowny zapis w v3', ok, { zapisV2: stored, poWczytaniu: after, zapisPo: resaved, sterowanie: restored });
+  record('E7', 'Stary zapis v2 z IndexedDB: stworzenia dostają naturę neutralną, zdolność i przedmiot zachowane, statystyki bez zmian; ponowny zapis w bieżącej wersji (v4)', ok, { zapisV2: stored, poWczytaniu: after, zapisPo: resaved, sterowanie: restored });
 } catch (e) { fail('E7', 'Zgodność zapisu v2', e); }
 
 
