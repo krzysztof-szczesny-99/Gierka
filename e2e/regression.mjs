@@ -721,7 +721,7 @@ try {
 
 // ═════════════ Sprint 3: model świata, dwie lokacje, przejścia, zapis lokacji ═════════════
 /** Bieżąca wersja formatu zapisu (Sprint 4: v3). */
-const SAVE_V = 4;
+const SAVE_V = 5;
 const REGION = 'kraina-szlakow';
 const POLANA = 'polana-startowa';
 const ZAGAJNIK = 'szepczacy-zagajnik';
@@ -1701,6 +1701,199 @@ try {
     eq(loaded, before) && obstacles.length === 0 && there.scena === WZGORZA && talk.join(' ').includes('Odznaka Wiatru dobrze') && starts === 0 && eq(final, before);
   record('C6', 'Zapis i wczytanie (przeładowanie + Kontynuuj): odznaka, ukończona Próba i otwarte przejście w IndexedDB i w grze; lider bez walki, bez drugiej nagrody', ok, { zapis: stored, przed: before, poWczytaniu: loaded, przeszkody: obstacles, wzgorza: there, rozmowa: talk, koniec: final, walk: starts });
 } catch (e) { fail('C6', 'Zapis Próby i ponowne wczytanie', e); }
+
+// ═════════════ Sprint 7: ukryta lokacja i specjalne spotkanie ═════════════
+const GROTA = 'grota-echa';
+const ABSOL = 'grota-absol';
+const STRAZNIK_EVENT = 'static-done:gaj-straznik';
+const hiddenState = () => S(() => {
+  const g = window.__szlaki.stores.useGame.getState();
+  return { odkryta: !!g.flags['hidden:grota-echa:discovered'], kapsulyPlus: g.bag['capsule-plus'] ?? 0, absol: g.specialEncounters['grota-absol'] ?? null, absolUkonczony: !!g.flags['special:grota-absol:done'], straznik: g.specialEncounters['gaj-straznik'] ?? null, pieniadze: g.player.money };
+});
+const sceneSpecials = () => S(() => window.__szlaki.game.scene.getScene('Overworld').actors.filter((a) => !a.removed).map((a) => a.id));
+const entranceMarkers = () => S(() => window.__szlaki.game.scene.getScene('Overworld').hiddenEntranceInfo());
+const waitSpecialOnMap = (id) => page.waitForFunction((id) => !!window.__szlaki.game.scene.getScene('Overworld').actors.find((a) => a.id === `static:${id}` && !a.removed), id, { timeout: 30000 });
+
+// ───────────── H1. Zablokowane wejście do ukrytej lokacji (brak jednego z dwóch wymagań) ─────────────
+try {
+  await ensureMap();
+  await setStepRng('miss');
+  // Stan „bez wymagań”: Strażnik Cichego Gaju nierozstrzygnięty (flaga wyłączona na czas testu — przywracana w finally).
+  await S((f) => window.__szlaki.stores.useGame.getState().setFlag(f, false), STRAZNIK_EVENT);
+  await goTo(WZGORZA, 8, 8, 'left');
+  const before = await hiddenState();
+  const markers = await entranceMarkers();
+  await page.getByRole('button', { name: 'Akcja' }).click();
+  await page.locator('.dialog').waitFor({ timeout: 8000 });
+  const lines = await readDialogs();
+  await ensureMap();
+  const p = await where();
+  const after = await hiddenState();
+  const ok =
+    markers.length === 0 && lines.join(' ').includes('Szczelina jest jednak zbyt wąska') && lines.join(' ').includes('Wymagania: Strażnik Cichego Gaju (złapany lub pokonany)') && !lines.join(' ').includes('Odznaka Wiatru;') &&
+    p.scena === WZGORZA && same(p.poz, [8, 8]) && !after.odkryta && after.kapsulyPlus === before.kapsulyPlus;
+  record('H1', 'Zablokowane wejście: badanie głazu bez wymagań (Strażnik nierozstrzygnięty) → komunikat z brakującym wymaganiem, bez przejścia, bez odkrycia i nagrody; wejście niewidoczne', ok, { przeszkody: markers, dialog: lines, gdzie: p, przed: before, po: after });
+} catch (e) { fail('H1', 'Zablokowane wejście do ukrytej lokacji', e); }
+finally {
+  await S((f) => window.__szlaki.stores.useGame.getState().setFlag(f, true), STRAZNIK_EVENT).catch(() => undefined);
+}
+
+// ───────────── H2. Odblokowane wejście i odkrycie lokacji (wydarzenie + nagroda raz), spotkanie widoczne ─────────────
+let h2ok = false;
+try {
+  await ensureMap();
+  await setStepRng('miss');
+  await goTo(WZGORZA, 8, 8, 'left');
+  const before = await hiddenState();
+  await page.getByRole('button', { name: 'Akcja' }).click();
+  await page.locator('.dialog').waitFor({ timeout: 8000 });
+  const lines = await readDialogs();
+  await waitArrival(GROTA);
+  const arrived = await where();
+  const after = await hiddenState();
+  const save = await idbSave();
+  await waitSpecialOnMap(ABSOL);
+  const specials = await sceneSpecials();
+  await shot('h2-grota-echa');
+  h2ok =
+    lines.join(' ').includes('Odkrywasz ukryte miejsce: Grota Echa') && lines.join(' ').includes('Znajdujesz: Kapsuła+ ×3') &&
+    arrived.scena === GROTA && arrived.mapa === 'grota' && arrived.punkt === 'z-wzgorz' && same(arrived.poz, [7, 10]) && arrived.towarzysz && /Grota Echa/.test(arrived.hud ?? '') &&
+    !before.odkryta && after.odkryta && after.kapsulyPlus - before.kapsulyPlus === 3 && save?.lokacja === GROTA && specials.includes(`static:${ABSOL}`);
+  record('H2', 'Odblokowane wejście (Odznaka Wiatru + Strażnik): odkrycie Groty Echa — komunikat, wydarzenie i Kapsuła+ ×3 raz, przejście do ukrytej lokacji (zapis od razu); specjalne stworzenie widoczne', h2ok, { dialog: lines, przybycie: arrived, przed: before, po: after, zapis: save, naMapie: specials });
+} catch (e) { fail('H2', 'Odkrycie ukrytej lokacji', e); }
+
+// ───────────── H3. Specjalne spotkanie: kontakt → centralna blokada → walka; ucieczka (UNTIL_RESOLVED) ─────────────
+try {
+  if (!h2ok) throw new Error('brak wejścia do Groty z H2');
+  await ensureMap();
+  await setStepRng('miss');
+  await S(() => window.__szlaki.stores.useGame.getState().healAll());
+  await teleportTo(7, 3, 'up');
+  await resetCooldown();
+  await watchEncounters();
+  const p0 = await pos();
+  await hold(...OFF.up, 450, false); // kontakt ze stworzeniem na (7,2)
+  const st0 = await ui();
+  const other = await S(() => window.__szlaki.stores.useUi.getState().tryStartEncounter('static:test'));
+  await idle(400);
+  const p1 = await pos();
+  await page.mouse.up();
+  await waitBattle();
+  const foe = await enemy();
+  const ev = await encounters();
+  await shot('h3-absol-walka');
+  const outcome = await fleeFast();
+  await idle(400);
+  const specials = await sceneSpecials();
+  const st = await hiddenState();
+  const ok =
+    ev.length === 1 && ev[0].kind === 'static' && ev[0].actorId === `static:${ABSOL}` && same(p0, p1) && ['ENCOUNTER_STARTING', 'BATTLE'].includes(st0.gameMode) && st0.sourceEntityId === `static:${ABSOL}` && other === null &&
+    foe.pokemon === 'absol' && foe.level === 16 && foe.mighty === false && outcome === 'fled' &&
+    !specials.includes(`static:${ABSOL}`) && st.absol?.result === 'ESCAPED' && st.absol?.attempts === 1 && !st.absolUkonczony;
+  record('H3', 'Specjalne spotkanie: kontakt joystickiem (gracz stoi) → centralna blokada (inne spotkanie odrzucone) → walka z Absolem L16; ucieczka: wynik ESCAPED zapisany, bez ukończenia, stworzenie znika do ponownego wejścia', ok, { spotkania: ev, gracz: [p0, p1], blokada: st0, inneSpotkanie: other, przeciwnik: foe, wynik: outcome, naMapie: specials, stan: st });
+} catch (e) { fail('H3', 'Specjalne spotkanie i ucieczka', e); }
+
+// ───────────── H4. Ponowne wejście: widoczne wejście na Wzgórzach, bez drugiego odkrycia; stworzenie wraca ─────────────
+try {
+  if (!h2ok) throw new Error('brak wejścia do Groty z H2');
+  await ensureMap();
+  await setStepRng('miss');
+  await teleportTo(7, 10, 'down');
+  await hold(...OFF.down, 700, false); // 10 → 11 (wyjście z groty)
+  await waitArrival(WZGORZA);
+  await page.mouse.up();
+  const out = await where();
+  const markers = await entranceMarkers();
+  const before = await hiddenState();
+  await teleportTo(8, 8, 'left');
+  await page.getByRole('button', { name: 'Akcja' }).click();
+  await waitArrival(GROTA);
+  const noDialog = (await page.locator('.dialog').count()) === 0;
+  await waitSpecialOnMap(ABSOL);
+  const specials = await sceneSpecials();
+  const after = await hiddenState();
+  const ok =
+    out.scena === WZGORZA && out.punkt === 'z-groty' && same(out.poz, [8, 8]) && eq(markers, [{ id: GROTA, x: 7, y: 8 }]) &&
+    noDialog && after.kapsulyPlus === before.kapsulyPlus && specials.includes(`static:${ABSOL}`) && after.absol?.result === 'ESCAPED';
+  record('H4', 'Po ucieczce: wyjście z Groty, widoczna szczelina na Wzgórzach, ponowne wejście bez drugiego odkrycia i nagrody; stworzenie znów stoi w grocie', ok, { wyjscie: out, wejscie: markers, bezDialogu: noDialog, naMapie: specials, przed: before, po: after });
+} catch (e) { fail('H4', 'Ponowne wejście do ukrytej lokacji', e); }
+
+// ───────────── H5. Pokonanie: wynik DEFEATED i ukończenie zapisane, stworzenie znika na stałe ─────────────
+try {
+  if (!h2ok) throw new Error('brak wejścia do Groty z H2');
+  await ensureMap();
+  await setStepRng('miss');
+  await S(() => window.__szlaki.stores.useGame.getState().healAll());
+  await teleportTo(7, 3, 'up');
+  await resetCooldown();
+  await hold(...OFF.up, 450, false);
+  await page.mouse.up();
+  await waitBattle();
+  await page.waitForFunction(() => window.__szlaki.stores.useBattle.getState().phase === 'choose', null, { timeout: 20000 });
+  await S(() => {
+    const B = window.__szlaki.stores.useBattle;
+    const engine = structuredClone(B.getState().engine);
+    engine.sides[1].party.forEach((c) => { c.hp = 1; });
+    B.setState({ engine });
+  });
+  if (!(await fightToEnd(false))) throw new Error('walka nie dobiegła końca');
+  const outcome = await S(() => window.__szlaki.stores.useBattle.getState().engine.outcome);
+  await page.getByRole('button', { name: 'Dalej' }).click();
+  await afterBattleBackOnMap();
+  await ensureMap();
+  await idle(500);
+  const specials = await sceneSpecials();
+  const st = await hiddenState();
+  const ok = outcome === 'win' && !specials.includes(`static:${ABSOL}`) && st.absol?.result === 'DEFEATED' && st.absol?.attempts === 2 && st.absol?.completedAt !== null && st.absolUkonczony;
+  record('H5', 'Pokonanie specjalnego stworzenia: wynik DEFEATED (2. walka) i wydarzenie ukończenia zapisane, stworzenie znika na stałe', ok, { wynik: outcome, naMapie: specials, stan: st });
+} catch (e) { fail('H5', 'Pokonanie specjalnego stworzenia', e); }
+
+// ───────────── H6. Ponowne wczytanie: odkrycie i wyniki zostają, ukończone spotkanie nie wraca (także po ponownym wejściu) ─────────────
+try {
+  if (!h2ok) throw new Error('brak wejścia do Groty z H2');
+  await ensureMap();
+  await setStepRng('miss');
+  const before = await hiddenState();
+  await idle(2800); // autozapis po walce
+  const stored = await S(() => new Promise((resolve, reject) => {
+    const req = indexedDB.open('szlaki-dziczy');
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const q = req.result.transaction('saves', 'readonly').objectStore('saves').get('slot1');
+      q.onsuccess = () => { req.result.close(); const d = q.result?.data; resolve(d ? { wersja: d.version, lokacja: d.player.locationId, odkryta: !!d.flags['hidden:grota-echa:discovered'], absolUkonczony: !!d.flags['special:grota-absol:done'], wyniki: d.specialEncounters } : null); };
+      q.onerror = () => reject(q.error);
+    };
+  }));
+  await page.reload();
+  await page.getByRole('button', { name: /Kontynuuj/ }).click({ timeout: 15000 });
+  await waitJoystick();
+  await waitArrival(GROTA);
+  await setStepRng('miss');
+  await idle(3000); // czas na ewentualne pojawienie się stworzenia
+  const afterReload = await sceneSpecials();
+  const loaded = await hiddenState();
+  // Wyjście i ponowne wejście po ukończeniu — stworzenie nie wraca.
+  await teleportTo(7, 10, 'down');
+  await hold(...OFF.down, 700, false);
+  await waitArrival(WZGORZA);
+  await page.mouse.up();
+  const markers = await entranceMarkers();
+  await teleportTo(8, 8, 'left');
+  await page.getByRole('button', { name: 'Akcja' }).click();
+  await waitArrival(GROTA);
+  await idle(3000);
+  const afterReentry = await sceneSpecials();
+  await page.locator('.hud-menu button', { hasText: 'Dziennik' }).click();
+  await page.locator('.modal').waitFor();
+  const journal = ((await page.locator('[data-hidden="grota-echa"]').textContent()) ?? '').trim();
+  await shot('h6-dziennik-odkrycia');
+  await page.locator('.modal-close').click();
+  const ok =
+    stored?.wersja === SAVE_V && stored.lokacja === GROTA && stored.odkryta && stored.absolUkonczony && stored.wyniki?.['grota-absol']?.result === 'DEFEATED' && stored.wyniki?.['gaj-straznik']?.result === 'CAUGHT' &&
+    eq(loaded, before) && afterReload.length === 0 && afterReentry.length === 0 && eq(markers, [{ id: GROTA, x: 7, y: 8 }]) &&
+    journal.includes('Grota Echa') && journal.includes('Cień Groty Echa: pokonane');
+  record('H6', 'Zapis i wczytanie: odkrycie, wynik DEFEATED (Absol) i CAUGHT (Strażnik z T10) w IndexedDB; po przeładowaniu i po ponownym wejściu ukończone spotkanie nie wraca; Dziennik pokazuje odkryte miejsce', ok, { zapis: stored, przed: before, poWczytaniu: loaded, naMapiePoWczytaniu: afterReload, naMapiePoWejsciu: afterReentry, wejscie: markers, dziennik: journal });
+} catch (e) { fail('H6', 'Ponowne wczytanie i brak ponownego pojawienia', e); }
 
 // ───────────── U1. Wersja i ręczne sprawdzenie aktualizacji (Menu) ─────────────
 try {

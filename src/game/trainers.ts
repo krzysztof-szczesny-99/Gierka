@@ -4,6 +4,7 @@
 import { LEADER_TRAINERS } from '../config/challenges';
 import { isHeldItemId, ITEMS } from '../config/items';
 import { isNatureId } from '../config/natures';
+import { SPECIAL_ENCOUNTERS } from '../config/specialEncounters';
 import { TRAINERS, type TrainerDef } from '../config/trainers';
 import { WORLD, type WorldDef } from '../config/world';
 import { isAiProfile } from '../engine/battle/ai';
@@ -190,7 +191,8 @@ export function validateTrainers(
     if (!isWalkable(grid, x, y)) add('INVALID_POSITION', t, `Trener stoi na przeszkodzie (${x},${y})`);
     if (connectionAt(loc, x, y)) add('INVALID_POSITION', t, `Trener stoi na wyjściu z mapy (${x},${y})`);
     if (loc.spawnPoints.some((p) => p.x === x && p.y === y)) add('INVALID_POSITION', t, `Trener stoi na punkcie pojawienia się (${x},${y})`);
-    if (map.staticEncounters.some((s) => s.x === x && s.y === y) || spots.has(key)) add('INVALID_POSITION', t, `Pole (${x},${y}) jest zajęte`);
+    const special = SPECIAL_ENCOUNTERS.some((s) => s.locationId === t.locationId && s.position.x === x && s.position.y === y);
+    if (special || spots.has(key)) add('INVALID_POSITION', t, `Pole (${x},${y}) jest zajęte`);
     spots.add(key);
     for (const e of t.eventTriggers ?? []) {
       if (e.kind !== 'tile' || !isWalkable(grid, e.x, e.y) || connectionAt(loc, e.x, e.y)) add('INVALID_TRIGGER', t, `Pole wydarzenia (${e.x},${e.y}) musi być dostępne i nie może być wyjściem`);

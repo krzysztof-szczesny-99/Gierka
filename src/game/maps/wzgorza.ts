@@ -40,7 +40,6 @@ export const WZGORZA_MAP: MapDef = {
       stepDistance: ENCOUNTER_CONFIG.defaultStepDistance,
     },
   ],
-  staticEncounters: [],
   signs: {
     '10,1': [
       'Wzgórza Wiatru.',

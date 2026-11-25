@@ -58,7 +58,7 @@ export const ENCOUNTER_CONFIG = {
   defaultStepDistance: 1,
 } as const;
 
-/** Flaga zapisu oznaczająca, że spotkanie specjalne zostało zakończone (wygrana lub złapanie). */
+/** Flaga zapisu oznaczająca ukończenie spotkania specjalnego ze Sprintu 2 (zachowana w modelu ze Sprintu 7). */
 export function staticDoneFlag(staticId: string): string {
   return `static-done:${staticId}`;
 }
@@ -136,12 +136,6 @@ export const ENCOUNTER_TABLES: Record<string, EncounterTable> = {
       { pokemonId: 'swablu', weight: 6, minLevel: 10, maxLevel: 13, encounterMethod: 'grass', rarity: 'uncommon' },
       { pokemonId: 'rookidee', weight: 3, minLevel: 11, maxLevel: 13, encounterMethod: 'grass', rarity: 'rare' },
     ],
-  },
-  // Jedyne widoczne stworzenie na mapie: nieruchomy „Strażnik Cichego Gaju” (spotkanie specjalne).
-  'grove-guardian': {
-    id: 'grove-guardian',
-    mightyChance: 1,
-    entries: [{ pokemonId: 'growlithe', weight: 1, minLevel: 8, maxLevel: 8, encounterMethod: 'static', rarity: 'rare' }],
   },
 };
 

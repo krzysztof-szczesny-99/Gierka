@@ -6,6 +6,8 @@ import { isHeldItemId, ITEMS, STARTING_BAG, STARTING_MONEY, type ItemId } from '
 import { QUESTS } from '../config/quests';
 import { RULES } from '../config/rules';
 import { challengeRewardItems, challengeVictory, getChallenge } from '../game/challenges';
+import { discoveryRewardItems, getHiddenLocation, isDiscovered } from '../game/hiddenLocations';
+import { getSpecialEncounter, specialOutcome, type SpecialEncounterRecord, type SpecialOutcomeUpdate } from '../game/specialEncounters';
 import { getLocation, startPosition, type WorldPosition } from '../game/world';
 import { displayName, healCreature, toMoveSlot } from '../engine/creature';
 import type { Creature, Dir, MoveData, TypeName } from '../engine/types';
@@ -14,9 +16,10 @@ import type { Creature, Dir, MoveData, TypeName } from '../engine/types';
  * Wersja formatu zapisu. 2 (Sprint 3): położenie w modelu świata (regionId, locationId, spawnPointId)
  * zamiast `mapId`. 3 (Sprint 4): stworzenia z naturą, abilityId, heldItemId i evolutionState.
  * 4 (Sprint 6): postęp Prób Szlaku — earnedBadges, completedChallenges, unlockedConnections.
+ * 5 (Sprint 7): wyniki spotkań specjalnych — specialEncounters (odkrycia ukrytych lokacji to flagi).
  * Migracje starszych zapisów — src/data/migrations.ts.
  */
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 
 export interface PlayerState {
   name: string;
@@ -74,7 +77,17 @@ export interface GameData {
   completedChallenges: string[];
   /** Otwarte zamknięte przejścia (LocationConnection.locked) — efekty odznak. */
   unlockedConnections: string[];
+  /** Wyniki spotkań specjalnych (src/config/specialEncounters.ts): ostatni wynik, liczba walk, ukończenie. */
+  specialEncounters: Record<string, SpecialEncounterRecord>;
   settings: Settings;
+}
+
+/** Wynik odkrycia ukrytej lokacji (do komunikatu przed wejściem). */
+export interface HiddenDiscovery {
+  /** Pierwsze wejście — wydarzenie odkrycia zapisane teraz, nagroda przyznana. */
+  first: boolean;
+  money: number;
+  items: [ItemId, number][];
 }
 
 /** Wynik pierwszego zwycięstwa w Próbie (do komunikatów po walce). */
@@ -117,6 +130,7 @@ function freshData(): GameData {
     earnedBadges: [],
     completedChallenges: [],
     unlockedConnections: [],
+    specialEncounters: {},
     settings: { ...DEFAULT_SETTINGS },
   };
 }
@@ -167,6 +181,16 @@ export interface GameStore extends GameData {
    * (wtedy nic się nie zmienia — odznaka i nagroda nie mogą zostać przyznane drugi raz).
    */
   completeChallenge(challengeId: string): ChallengeCompletion | null;
+  /**
+   * Wynik walki ze stworzeniem specjalnym: wpis w zapisie i — gdy spotkanie znika na stałe — wydarzenie ukończenia
+   * (jedna zmiana stanu). null — nieznane spotkanie, brak wyniku albo spotkanie już ukończone.
+   */
+  recordSpecialEncounter(specialId: string, outcome: string): SpecialOutcomeUpdate | null;
+  /**
+   * Odkrycie ukrytej lokacji: przy pierwszym wejściu zapisuje wydarzenie odkrycia i przyznaje nagrodę (jedna zmiana
+   * stanu — dokładnie raz). Kolejne wejścia: first = false, bez nagrody. null — nieznana lokacja.
+   */
+  discoverHiddenLocation(hiddenId: string): HiddenDiscovery | null;
 }
 
 const DATA_KEYS: (keyof GameData)[] = [
@@ -182,6 +206,7 @@ const DATA_KEYS: (keyof GameData)[] = [
   'earnedBadges',
   'completedChallenges',
   'unlockedConnections',
+  'specialEncounters',
   'settings',
 ];
 
@@ -433,6 +458,32 @@ export const useGame = create<GameStore>()((set, get) => ({
       player: { ...s.player, money: s.player.money + money },
     });
     return { challenge, badge: v.badge, unlocked: v.unlocked, money, items };
+  },
+
+  recordSpecialEncounter: (specialId, outcome) => {
+    const s = get();
+    const def = getSpecialEncounter(specialId);
+    if (!def) return null;
+    const u = specialOutcome(def, outcome, s.specialEncounters[def.id], s.flags, Date.now());
+    if (!u) return null;
+    set({
+      specialEncounters: { ...s.specialEncounters, [def.id]: u.record },
+      ...(u.completes ? { flags: { ...s.flags, [def.completionEventId]: true } } : {}),
+    });
+    return u;
+  },
+
+  discoverHiddenLocation: (hiddenId) => {
+    const s = get();
+    const h = getHiddenLocation(hiddenId);
+    if (!h) return null;
+    if (isDiscovered(h, s.flags)) return { first: false, money: 0, items: [] };
+    const money = Math.max(0, Math.floor(h.rewards.money));
+    const items = discoveryRewardItems(h);
+    const bag = { ...s.bag };
+    for (const [id, n] of items) bag[id] = (bag[id] ?? 0) + n;
+    set({ flags: { ...s.flags, [h.discoveryEventId]: true }, bag, player: { ...s.player, money: s.player.money + money } });
+    return { first: true, money, items };
   },
 }));
 

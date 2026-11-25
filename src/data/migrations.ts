@@ -7,11 +7,14 @@
 // v3 → v4 (Sprint 6): postęp Prób Szlaku — earnedBadges, completedChallenges, unlockedConnections. Dawne flagi
 // `badge:<id>` (wymagania z Sprintu 3) stają się zdobytymi odznakami; wydarzenia ukończenia Prób — ukończonymi
 // Próbami; odblokowania wynikają z odznak. Flagi zostają nietknięte.
+// v4 → v5 (Sprint 7): wyniki spotkań specjalnych (specialEncounters) — puste; ukończenie spotkania ze Sprintu 2
+// (flaga static-done:…) i odkrycia ukrytych lokacji (flagi) działają bez zmian.
 
 import { HELD_ITEM_IDS } from '../config/items';
 import { isNatureId, neutralNatureFor } from '../config/natures';
 import { DEFAULT_SPAWN_POINT_ID } from '../config/world';
 import { getBadge, normalizeProgression } from '../game/challenges';
+import { normalizeSpecialRecords } from '../game/specialEncounters';
 import { getLocation, locationForMap, startLocation } from '../game/world';
 import { SAVE_VERSION, type GameData, type PlayerState } from '../state/gameStore';
 
@@ -69,10 +72,16 @@ function v3ToV4(data: AnyRecord): AnyRecord {
   return { ...data, earnedBadges: legacyBadges, completedChallenges: [], unlockedConnections: [], version: 4 };
 }
 
+/** v4 → v5: pusta lista wyników spotkań specjalnych. */
+function v4ToV5(data: AnyRecord): AnyRecord {
+  return { ...data, specialEncounters: {}, version: 5 };
+}
+
 const STEPS: Record<number, (d: AnyRecord) => AnyRecord> = {
   1: v1ToV2,
   2: v2ToV3,
   3: v3ToV4,
+  4: v4ToV5,
 };
 
 /** Doprowadza dowolny obsługiwany zapis do bieżącej wersji (SAVE_VERSION). */
@@ -92,6 +101,7 @@ export function migrateSave(raw: unknown): GameData {
   data.storage = Array.isArray(data.storage) ? data.storage.map(upgradeCreatureV3) : [];
   // Postęp Prób zawsze spójny (idempotentne): ukończona Próba ⇒ odznaka ⇒ odblokowane przejścia.
   Object.assign(data, normalizeProgression(data));
+  data.specialEncounters = normalizeSpecialRecords(data.specialEncounters);
   // Zapis z niepełnym położeniem (np. ręcznie edytowany) — uzupełnienie lokacją startową.
   const player = (isRecord(data.player) ? data.player : {}) as Partial<PlayerState>;
   if (!getLocation(player.locationId)) {

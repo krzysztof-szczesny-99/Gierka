@@ -22,8 +22,8 @@ function v1Save() {
 }
 
 describe('migracja zapisu v1 → v2 (→ bieżąca)', () => {
-  it('bieżąca wersja formatu to 4 (Sprint 6: postęp Prób Szlaku)', () => {
-    expect(SAVE_VERSION).toBe(4);
+  it('bieżąca wersja formatu to 5 (Sprint 7: wyniki spotkań specjalnych)', () => {
+    expect(SAVE_VERSION).toBe(5);
   });
 
   it('mapId „polana” → region, lokacja Polana Startowa i punkt „start”; pozycja i postęp zachowane', () => {
@@ -140,10 +140,10 @@ describe('migracja zapisu v2 → v3 (Sprint 4: natura, zdolność, przedmiot, ew
     expect(after.moves).toEqual(before.moves);
   });
 
-  it('zapis v1 przechodzi przez v2 i v3 do v4; wynik jest stabilny (ponowna migracja nic nie zmienia)', () => {
+  it('zapis v1 przechodzi przez v2, v3 i v4 do v5; wynik jest stabilny (ponowna migracja nic nie zmienia)', () => {
     const fromV1 = migrateSave({ ...v1Save(), party: [oldCreature('c-1')] });
-    expect(fromV1.version).toBe(4);
-    expect(fromV1).toMatchObject({ earnedBadges: [], completedChallenges: [], unlockedConnections: [] });
+    expect(fromV1.version).toBe(5);
+    expect(fromV1).toMatchObject({ earnedBadges: [], completedChallenges: [], unlockedConnections: [], specialEncounters: {} });
     expect(fromV1.player.locationId).toBe(POLANA_ID);
     expect(fromV1.party[0].abilityId).toBe('keen-eye');
     const again = migrateSave(JSON.parse(JSON.stringify(fromV1)));
@@ -162,7 +162,7 @@ describe('migracja zapisu v3 → v4 (Sprint 6: odznaki, ukończone Próby, odblo
 
   it('zwykły zapis v3: puste listy postępu Prób, reszta zapisu bez zmian', () => {
     const out = migrateSave(v3());
-    expect(out.version).toBe(4);
+    expect(out.version).toBe(SAVE_VERSION); // v3 → v4 → v5
     expect(out).toMatchObject({ earnedBadges: [], completedChallenges: [], unlockedConnections: [] });
     expect(out.flags).toEqual({ 'trainer:zagajnik-iga:defeated': true });
     expect(out.player).toMatchObject({ locationId: ZAGAJNIK_ID, x: 10, y: 12, money: 500 });
@@ -202,8 +202,35 @@ describe('migracja zapisu v3 → v4 (Sprint 6: odznaki, ukończone Próby, odblo
     const out = migrateSave({ ...v3(), version: 4, earnedBadges: ['odznaka-wiatru'], completedChallenges: ['proba-wiatru'], unlockedConnections: ['zagajnik-do-wzgorz'] });
     useGame.getState().loadData(out);
     const snap = useGame.getState().snapshot();
-    expect(snap).toMatchObject({ version: 4, earnedBadges: ['odznaka-wiatru'], completedChallenges: ['proba-wiatru'], unlockedConnections: ['zagajnik-do-wzgorz'] });
+    expect(snap).toMatchObject({ version: SAVE_VERSION, earnedBadges: ['odznaka-wiatru'], completedChallenges: ['proba-wiatru'], unlockedConnections: ['zagajnik-do-wzgorz'] });
     expect(migrateSave(snap)).toEqual(snap);
     useGame.getState().resetGame();
+  });
+});
+
+describe('migracja zapisu v4 → v5 (Sprint 7: wyniki spotkań specjalnych)', () => {
+  const v4 = (extra: Record<string, unknown> = {}) => ({
+    ...v1Save(),
+    version: 4,
+    player: { name: 'E', regionId: REGION_ID, locationId: POLANA_ID, spawnPointId: 'start', x: 8, y: 7, facing: 'down', money: 900, steps: 1, playTimeMs: 1, startedAt: 1 },
+    flags: { 'static-done:gaj-straznik': true, 'grove-done': true },
+    earnedBadges: ['odznaka-wiatru'],
+    completedChallenges: ['proba-wiatru'],
+    unlockedConnections: ['zagajnik-do-wzgorz'],
+    ...extra,
+  });
+
+  it('zapis v4: pusta lista wyników; ukończony Strażnik (flaga ze Sprintu 2) i postęp Prób bez zmian', () => {
+    const out = migrateSave(v4());
+    expect(out.version).toBe(5);
+    expect(out.specialEncounters).toEqual({});
+    expect(out.flags['static-done:gaj-straznik']).toBe(true);
+    expect(out).toMatchObject({ earnedBadges: ['odznaka-wiatru'], completedChallenges: ['proba-wiatru'], unlockedConnections: ['zagajnik-do-wzgorz'] });
+  });
+
+  it('zapis v5: tylko poprawne wpisy wyników; ponowna migracja stabilna', () => {
+    const out = migrateSave({ ...v4(), version: 5, specialEncounters: { 'grota-absol': { result: 'ESCAPED', attempts: 2, completedAt: null }, zly: { result: '?' } } });
+    expect(out.specialEncounters).toEqual({ 'grota-absol': { result: 'ESCAPED', attempts: 2, completedAt: null } });
+    expect(migrateSave(JSON.parse(JSON.stringify(out)))).toEqual(out);
   });
 });

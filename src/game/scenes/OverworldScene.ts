@@ -6,19 +6,24 @@
 
 import * as Phaser from 'phaser';
 import { ENCOUNTER_CONFIG } from '../../config/encounters';
+import { ITEMS } from '../../config/items';
 import { trainerActorId, type TrainerDef } from '../../config/trainers';
 import { getPokemon } from '../../data/repository';
 import type { Dir } from '../../engine/types';
 import type { WildSpawn } from '../../services/creatureService';
-import { buildStaticSpawn, encounterStepRng } from '../../services/encounterService';
+import { buildSpecialSpawn, encounterStepRng } from '../../services/encounterService';
 import { leadCreature, useGame } from '../../state/gameStore';
 import { isOverworldBlocked, useUi } from '../../state/uiStore';
-import { activeStaticEncounters, encounterZoneAt } from '../encounterZones';
+import { encounterZoneAt } from '../encounterZones';
+import { activeSpecialEncounters, specialResultOf, stateAfter } from '../specialEncounters';
+import { hiddenEntranceAt, hiddenEntryCheck, visibleEntrances } from '../hiddenLocations';
+import type { SpecialEncounterDef } from '../../config/specialEncounters';
+import type { HiddenLocationDef } from '../../config/hiddenLocations';
 import { bus, type EncounterOutcome } from '../eventBus';
 import { consumeAction, releaseInput, resetVirtualInput, virtualInput } from '../input';
 import type { LocationConnection, LocationDef } from '../../config/world';
 import { saveNow } from '../../data/saveGame';
-import { TEST_MAP, type MapDef, type StaticEncounterDef, type ZoneDef } from '../maps/testMap';
+import { TEST_MAP, type MapDef, type ZoneDef } from '../maps/testMap';
 import { checkTravel, connectionAt, getLocation, isConnectionOpen, mapOf, resolveSafeEntry, startLocation, type WorldPosition } from '../world';
 import { challengeState, getChallenge } from '../challenges';
 import { approachPath, canChallenge, eventTriggerAt, facingTo, seesPlayer, sightLine, talkKind, trainersIn, type TalkKind } from '../trainers';
@@ -33,7 +38,7 @@ import {
   stepDurationMs,
   type Point,
 } from '../movement';
-import { ensureCreatureTexture, FALLEN_TREE_KEY, TILESET_KEY, type CreatureTexture } from '../textures';
+import { ensureCreatureTexture, FALLEN_TREE_KEY, HIDDEN_ENTRANCE_KEY, TILESET_KEY, type CreatureTexture } from '../textures';
 import { tileDef, TILE_SIZE, WATER_ALT_INDEX } from '../tiles';
 
 const WATER_INDEX = 3;
@@ -57,7 +62,7 @@ interface TrainerActor {
 
 interface StaticActor {
   id: string;
-  def: StaticEncounterDef;
+  def: SpecialEncounterDef;
   spawn: WildSpawn;
   tx: number;
   ty: number;
@@ -107,6 +112,12 @@ export class OverworldScene extends Phaser.Scene {
   private lockObstacles = new Map<string, Phaser.GameObjects.Image>();
   /** Odmowa lidera po wejściu na arenę bez wymagań — raz na wizytę w lokacji (rozmowa zawsze działa). */
   private refusalShown = new Set<string>();
+  /** Spotkania specjalne w stanie HIDDEN_UNTIL_REENTRY — wracają po ponownym wejściu na mapę (nowa scena). */
+  private dormantSpecials = new Set<string>();
+  /** Widoczne wejścia do odkrytych ukrytych lokacji (Sprint 7) — klucz: id ukrytej lokacji. */
+  private entranceMarkers = new Map<string, Phaser.GameObjects.Image>();
+  /** Trwa wejście do ukrytej lokacji (komunikat odkrycia przed przejściem). */
+  private enteringHidden = false;
   private cursors: Phaser.Types.Input.Keyboard.CursorKeys | null = null;
   private keyAction: Phaser.Input.Keyboard.Key | null = null;
   private keyRun: Phaser.Input.Keyboard.Key | null = null;
@@ -136,6 +147,9 @@ export class OverworldScene extends Phaser.Scene {
     this.trainers = [];
     this.lockObstacles = new Map();
     this.refusalShown = new Set();
+    this.dormantSpecials = new Set();
+    this.entranceMarkers = new Map();
+    this.enteringHidden = false;
     this.layer = null;
     this.waterAlt = false;
     this.cleanups = [];
@@ -191,9 +205,10 @@ export class OverworldScene extends Phaser.Scene {
 
     // Animacja wody; spotkania specjalne (jedyne widoczne stworzenia, nieruchome); kroki ochronne po wejściu na mapę.
     this.time.addEvent({ delay: 650, loop: true, callback: () => this.animateWater() });
-    this.spawnStaticEncounters();
+    this.spawnSpecialEncounters();
     this.spawnTrainers();
     this.refreshLockObstacles();
+    this.refreshEntranceMarkers();
     useUi.getState().protectSteps(ENCOUNTER_CONFIG.mapEnterSafeSteps);
 
     // Towarzysz (prowadzący drużynę)
@@ -202,6 +217,7 @@ export class OverworldScene extends Phaser.Scene {
     const unsubGame = useGame.subscribe((s, prev) => {
       if (s.party !== prev.party || s.settings !== prev.settings) this.refreshFollower();
       if (s.unlockedConnections !== prev.unlockedConnections) this.refreshLockObstacles();
+      if (s.flags !== prev.flags) this.refreshEntranceMarkers();
     });
     // Podczas walki usypiamy pętlę Phasera (oszczędność baterii) i budzimy po powrocie.
     const unsubUi = useUi.subscribe((s, prev) => {
@@ -349,6 +365,9 @@ export class OverworldScene extends Phaser.Scene {
       this.useConnection(conn);
       return;
     }
+    // Ukryte wejście (rodzaj „tile”): wejście na pole sprawdza wymagania i prowadzi do ukrytej lokacji.
+    const hiddenTile = hiddenEntranceAt(this.location.id, this.tx, this.ty, 'tile');
+    if (hiddenTile && this.enterHidden(hiddenTile, false)) return;
     // Trenerzy: wydarzenie (pole-wyzwalacz) albo wzrok. Gdy trener zaczyna interakcję, losowania nie ma.
     if (this.checkTrainers()) return;
     // Losowe spotkanie: sprawdzane wyłącznie po wejściu na nowe pole (najwyżej jeden rzut na krok).
@@ -447,6 +466,63 @@ export class OverworldScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * Ukryte wejście (Sprint 7): wymagania niespełnione → komunikat z listą braków (bez przejścia i bez odkrycia);
+   * spełnione → przy pierwszym wejściu odkrycie (wydarzenie i nagroda raz) z komunikatem, potem przejście.
+   * Zwraca true, gdy wejście coś zrobiło (komunikat albo przejście).
+   */
+  private enterHidden(h: HiddenLocationDef, explicit: boolean): boolean {
+    if (this.disposed || this.traveling || this.enteringHidden) return false;
+    const g = useGame.getState();
+    const check = hiddenEntryCheck(h, { flags: g.flags, bag: g.bag, earnedBadges: g.earnedBadges, completedChallenges: g.completedChallenges });
+    this.setHeroFrame(false);
+    if (!check.ok) {
+      // Wejście przez pole bez spełnionych wymagań pozostaje niezauważone (lokacja jest ukryta); badanie — komunikat.
+      if (!explicit) return false;
+      bus.emit('dialog', { lines: check.message });
+      return true;
+    }
+    if (!check.firstDiscovery) {
+      this.travelTo(check.position);
+      return true;
+    }
+    const found = useGame.getState().discoverHiddenLocation(h.id);
+    if (!found) return false;
+    this.enteringHidden = true;
+    releaseInput('lock');
+    this.input.keyboard?.resetKeys();
+    const lines = [...h.discoveryMessage];
+    if (found.money > 0) lines.push(`Znajdujesz ${found.money} ◆.`);
+    for (const [item, n] of found.items) lines.push(`Znajdujesz: ${ITEMS[item].name} ×${n}.`);
+    saveNow().catch(() => undefined);
+    useUi.getState().showDialog(lines, () => {
+      this.enteringHidden = false;
+      if (!this.disposed) this.travelTo(check.position);
+    });
+    return true;
+  }
+
+  /** Widoczne wejścia do odkrytych ukrytych lokacji (visibleAfterDiscovery) na mapie lokacji nadrzędnej. */
+  private refreshEntranceMarkers(): void {
+    if (this.disposed) return;
+    const visible = visibleEntrances(this.location.id, useGame.getState().flags);
+    for (const h of visible) {
+      if (this.entranceMarkers.has(h.id)) continue;
+      const { x, y } = h.entranceTrigger;
+      const img = this.add.image(tileCenterX(x), tileBottomY(y), HIDDEN_ENTRANCE_KEY).setOrigin(0.5, 1);
+      img.setDepth(tileBottomY(y) + 4);
+      this.entranceMarkers.set(h.id, img);
+    }
+  }
+
+  /** Widoczne wejścia do ukrytych lokacji (diagnostyka i testy E2E). */
+  hiddenEntranceInfo(): { id: string; x: number; y: number }[] {
+    return [...this.entranceMarkers.keys()].map((id) => {
+      const h = visibleEntrances(this.location.id, useGame.getState().flags).find((x) => x.id === id);
+      return { id, x: h?.entranceTrigger.x ?? -1, y: h?.entranceTrigger.y ?? -1 };
+    });
+  }
+
   /** Widoczne przeszkody na zamkniętych przejściach (diagnostyka i testy E2E). */
   lockObstacleInfo(): { connectionId: string; x: number; y: number }[] {
     return [...this.lockObstacles.keys()].map((id) => {
@@ -475,6 +551,12 @@ export class OverworldScene extends Phaser.Scene {
 
   private interactAt(x: number, y: number, explicit: boolean): void {
     const key = `${x},${y}`;
+    // Ukryte wejście (rodzaj „interact”): tylko świadome zbadanie miejsca (przycisk Akcja).
+    const hidden = explicit ? hiddenEntranceAt(this.location.id, x, y, 'interact') : null;
+    if (hidden) {
+      this.enterHidden(hidden, true);
+      return;
+    }
     const door = this.mapDef.doors[key];
     if (door) {
       bus.emit('door', { kind: door });
@@ -549,29 +631,36 @@ export class OverworldScene extends Phaser.Scene {
     }
     const a = this.actors.find((x) => x.id === actorId);
     if (!a) return;
-    // Po wygranej lub złapaniu stworzenie specjalne znika na stałe (flaga w zapisie); inaczej zostaje na miejscu.
-    if (outcome === 'win' || outcome === 'caught') this.removeActor(a);
-    else a.engaged = false;
+    // Stan po wyniku z danych spotkania (Sprint 7): GONE — znika na stałe (wydarzenie ukończenia zapisał
+    // encounterService), HIDDEN_UNTIL_REENTRY — znika do ponownego wejścia na mapę, REMAINS — zostaje.
+    const result = specialResultOf(outcome);
+    const state = result ? stateAfter(a.def, result) : 'REMAINS';
+    if (state === 'GONE') this.removeActor(a);
+    else if (state === 'HIDDEN_UNTIL_REENTRY') {
+      this.dormantSpecials.add(a.def.id);
+      this.removeActor(a);
+    } else a.engaged = false;
   }
 
   // ───────────────────────────── stworzenia specjalne ─────────────────────────────
 
-  private spawnStaticEncounters(): void {
-    const flags = useGame.getState().flags;
-    for (const def of activeStaticEncounters(this.mapDef, flags)) {
-      const zoneName = this.mapDef.zones.find((z) => z.id === def.zoneId)?.name ?? this.mapDef.name;
-      buildStaticSpawn(def, zoneName)
+  private spawnSpecialEncounters(): void {
+    const g = useGame.getState();
+    const progress = { flags: g.flags, bag: g.bag, earnedBadges: g.earnedBadges, completedChallenges: g.completedChallenges };
+    for (const def of activeSpecialEncounters(this.location.id, progress, this.dormantSpecials)) {
+      const zoneName = this.mapDef.zones.find((z) => z.id === def.zoneId)?.name ?? this.location.name;
+      buildSpecialSpawn(def, zoneName)
         .then(async (spawn) => {
           if (this.disposed) return;
           const tex = await ensureCreatureTexture(this, spawn.pokemon, spawn.creature.shiny, useGame.getState().settings.useApiSprites);
-          if (this.disposed || this.actors.some((a) => a.def.id === def.id)) return;
+          if (this.disposed || this.actors.some((a) => a.def.id === def.id) || this.dormantSpecials.has(def.id)) return;
           this.createActor(def, spawn, tex);
         })
         .catch((e) => console.warn('Nie udało się przygotować spotkania specjalnego', e));
     }
   }
 
-  private createActor(def: StaticEncounterDef, spawn: WildSpawn, tex: CreatureTexture): void {
+  private createActor(def: SpecialEncounterDef, spawn: WildSpawn, tex: CreatureTexture): void {
     const mighty = spawn.creature.mighty;
     const parts: Phaser.GameObjects.GameObject[] = [this.add.ellipse(0, -1, 14, 5, 0x000000, 0.25)];
     let aura: Phaser.GameObjects.Ellipse | null = null;
@@ -585,16 +674,17 @@ export class OverworldScene extends Phaser.Scene {
       .setOrigin(0.5, tex.isBlob ? 1 : 0.92)
       .setScale(scale);
     parts.push(image);
-    const container = this.add.container(tileCenterX(def.x), tileBottomY(def.y), parts);
-    container.setDepth(tileBottomY(def.y) + 5);
+    const { x, y } = def.position;
+    const container = this.add.container(tileCenterX(x), tileBottomY(y), parts);
+    container.setDepth(tileBottomY(y) + 5);
     container.setAlpha(0);
     this.tweens.add({ targets: container, alpha: 1, duration: 350 });
     if (aura) this.tweens.add({ targets: aura, alpha: 0.15, duration: 700, yoyo: true, repeat: -1 });
     if (spawn.creature.shiny) this.tweens.add({ targets: image, alpha: 0.6, duration: 260, yoyo: true, repeat: 3 });
 
-    this.actors.push({ id: `static:${def.id}`, def, spawn, tx: def.x, ty: def.y, container, image, engaged: false, removed: false });
+    this.actors.push({ id: `static:${def.id}`, def, spawn, tx: x, ty: y, container, image, engaged: false, removed: false });
     // Towarzysz nie może stać na polu stworzenia.
-    if (this.followerTile && this.followerTile.x === def.x && this.followerTile.y === def.y) this.placeFollowerBehind();
+    if (this.followerTile && this.followerTile.x === x && this.followerTile.y === y) this.placeFollowerBehind();
   }
 
   private removeActor(a: StaticActor): void {

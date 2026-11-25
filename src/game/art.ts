@@ -405,6 +405,18 @@ export function drawFallenTree(ctx: Ctx, ox = 0, oy = 0): void {
   px(ctx, ox + 2, oy + 13, 12, 1, 'rgba(0,0,0,0.25)');
 }
 
+// ───────── odkryte ukryte wejście 16×16 (Sprint 7): ciemna szczelina w skale ─────────
+
+/** Ciemna szczelina z chłodnym poblaskiem (oryginalny rysunek) — nakładana na głaz po odkryciu ukrytej lokacji. */
+export function drawHiddenEntrance(ctx: Ctx, ox = 0, oy = 0): void {
+  px(ctx, ox + 6, oy + 4, 4, 10, '#1b1d24');
+  px(ctx, ox + 5, oy + 6, 6, 7, '#1b1d24');
+  px(ctx, ox + 7, oy + 3, 2, 1, '#1b1d24');
+  px(ctx, ox + 7, oy + 6, 2, 6, '#2d3442');
+  px(ctx, ox + 7, oy + 8, 1, 3, '#5d7a9c');
+  px(ctx, ox + 4, oy + 13, 8, 1, '#3a3d44');
+}
+
 // ───────── zastępcza sylwetka stworzenia 32×32 (oryginalna) ─────────
 
 function shade(hex: string, amount: number): string {

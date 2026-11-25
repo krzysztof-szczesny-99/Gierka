@@ -1,6 +1,7 @@
 // Budowanie stworzeń z danych PokéAPI (dzikie, startery) i pomocnicze ładowanie ruchów.
 
 import type { EncounterEntry, EncounterTable } from '../config/encounters';
+import type { SpecialEncounterDef } from '../config/specialEncounters';
 import type { TrainerMemberDef } from '../config/trainers';
 import { assertAllowedSpecies, rollLevel } from '../game/encounterZones';
 import { FALLBACK_DAMAGE_MOVE } from '../config/moveOverrides';
@@ -80,6 +81,20 @@ export async function buildWild(
     zoneId: zone.id,
     zoneName: zone.name,
   };
+}
+
+/**
+ * Stworzenie spotkania specjalnego (Sprint 7): gatunek i poziom z danych spotkania (bez losowania z tabeli);
+ * „potężny okaz” — premia poziomu jak w zwykłych spotkaniach. Legendarne i mityczne są tu dozwolone.
+ */
+export async function buildSpecial(def: SpecialEncounterDef, zone: { id: string; name: string }, rng: Rng): Promise<WildSpawn> {
+  const mighty = !!def.mighty;
+  const level = Math.min(RULES.maxLevel, def.level + (mighty ? RULES.mightyLevelBonus : 0));
+  const b = await loadBundle(def.pokemonId);
+  assertAllowedSpecies(b.species, 'static');
+  const moves = await movesFor(b.pokemon, level);
+  const creature = createCreature({ ...b, level, moves, rng, metAt: zone.name, mighty });
+  return { creature, pokemon: b.pokemon, species: b.species, zoneId: zone.id, zoneName: zone.name };
 }
 
 export async function buildStarter(name: string, level: number, rng: Rng): Promise<{ creature: Creature; bundle: CreatureBundle }> {

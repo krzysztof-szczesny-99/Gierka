@@ -17,7 +17,7 @@ import { releaseInput } from '../../game/input';
 import { getTrainer, talkKind } from '../../game/trainers';
 import { checkTravel, connectionAt, getLocation } from '../../game/world';
 import { useBattle } from '../../state/battleStore';
-import { useGame } from '../../state/gameStore';
+import { SAVE_VERSION, useGame } from '../../state/gameStore';
 import { useUi } from '../../state/uiStore';
 import type { CreatureBundle } from '../creatureService';
 import { configureEncounterDeps, finishBattle, startWildEncounter } from '../encounterService';
@@ -200,7 +200,7 @@ describe('wynik Próby', () => {
     await finishBattle();
     const before = progress();
     const saved = JSON.parse(JSON.stringify(useGame.getState().snapshot()));
-    expect(saved).toMatchObject({ version: 4, earnedBadges: [ODZNAKA_WIATRU_ID], completedChallenges: [PROBA_WIATRU_ID], unlockedConnections: ['zagajnik-do-wzgorz'] });
+    expect(saved).toMatchObject({ version: SAVE_VERSION, earnedBadges: [ODZNAKA_WIATRU_ID], completedChallenges: [PROBA_WIATRU_ID], unlockedConnections: ['zagajnik-do-wzgorz'] });
     useGame.getState().resetGame();
     expect(useGame.getState().earnedBadges).toEqual([]);
     useGame.getState().loadData(migrateSave(saved));

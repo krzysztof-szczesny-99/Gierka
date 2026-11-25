@@ -118,9 +118,19 @@ zapis, zbuforowane dane i sprite'y; w trawie spotkasz offline tylko gatunki, kt�
   Wygrana (dokładnie raz): **Odznaka Wiatru**, zapisane ukończenie, nagroda 800 ◆ i 2 Mocne napary oraz otwarcie
   przejścia z Zagajnika na nową mapę **Wzgórza Wiatru** (22×16, własna tabela spotkań). Przegrana: powrót do Stacji
   Opieki bez nagrody. Odznaki widać w Dzienniku.
-- Zapis w formacie v4 (Sprint 6: `earnedBadges`, `completedChallenges`, `unlockedConnections`; v3 — natura, zdolność,
-  przedmiot i stan ewolucji stworzeń; v2 — położenie w świecie). Starsze zapisy (v1–v3) są migrowane automatycznie —
-  postęp i pozycja zostają. Błędna lokacja lub pozycja w zapisie → bezpieczny punkt pojawienia się.
+- Ukryte lokacje i spotkania specjalne (Sprint 7, `src/config/hiddenLocations.ts`, `src/config/specialEncounters.ts`):
+  ogólny system ukrytych lokacji (ukryte wejście w lokacji nadrzędnej, wymagania: odznaki, przedmioty, wydarzenia,
+  ukończone Próby, odkryte przejścia — także kilka naraz; odkrycie zapisywane raz razem z nagrodą; po odkryciu wejście
+  widać na mapie i w Dzienniku). Pierwsza ukryta lokacja: **Grota Echa** — zbadaj (Akcja) głaz na zachód od ścieżki
+  Wzgórz Wiatru. Wymaga Odznaki Wiatru i rozstrzygniętego spotkania ze Strażnikiem Cichego Gaju; nagroda za odkrycie:
+  Kapsuła+ ×3. W grocie stoi **Cień Groty Echa** (Absol L16): kontakt przez centralną blokadę; po ucieczce wraca dopiero
+  po ponownym wejściu do groty, po złapaniu lub pokonaniu znika na stałe. Strażnik Cichego Gaju korzysta z tego samego
+  modelu (bez zmian w zachowaniu). Stworzenia legendarne i mityczne są dozwolone tylko w spotkaniach specjalnych —
+  walidacja danych i kod losowania pilnują zwykłych tabel.
+- Zapis w formacie v5 (Sprint 7: `specialEncounters` — wyniki spotkań specjalnych; v4 — `earnedBadges`,
+  `completedChallenges`, `unlockedConnections`; v3 — natura, zdolność, przedmiot i stan ewolucji stworzeń; v2 —
+  położenie w świecie). Starsze zapisy (v1–v4) są migrowane automatycznie — postęp i pozycja zostają. Błędna lokacja
+  lub pozycja w zapisie → bezpieczny punkt pojawienia się.
 - Ruch po siatce: joystick ekranowy, opcjonalnie klawiatura; bieg; kamera z dopasowaniem przybliżenia.
 - Spotkania przez jedną centralną blokadę (tylko jedno naraz, wynik walki liczony dokładnie raz, krótkie odnowienie po walce).
 - Losowe spotkania po kroku (Sprint 2): wysoka trawa (Łąka, brzeg Stawu, Cichy Gaj) — 10% na krok, skalisty grunt
@@ -159,6 +169,7 @@ zapis, zbuforowane dane i sprite'y; w trawie spotkasz offline tylko gatunki, kt�
 - Ruchy wieloturowe (np. ładowanie, odpoczynek po ataku) działają jak zwykły atak; pogoda i pola bitwy — brak.
 - Trenerzy i liderka Próby nie mają jeszcze własnych grafik (przebarwiona postać gracza) ani wyboru „tak/nie” przed rewanżem.
 - Jest jedna Próba i jedna odznaka; Wzgórza Wiatru kończą się na północy (dalszy szlak nie jest jeszcze zbudowany).
+- Jedna ukryta lokacja i jedno nowe spotkanie specjalne; grota korzysta z kafelków głazów i skalistego gruntu.
 - Nazwy stworzeń i ruchów są angielskie (PokéAPI nie ma języka polskiego).
 - Przerwana walka (zamknięcie aplikacji) nie jest wznawiana — wracasz na mapę sprzed walki.
 

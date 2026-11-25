@@ -2,6 +2,8 @@ import { useShallow } from 'zustand/react/shallow';
 import { ITEMS, type ItemId } from '../../config/items';
 import { getLocation } from '../../game/world';
 import { badgesInOrder, challengeState, getChallenge, missingRequirements } from '../../game/challenges';
+import { HIDDEN_LOCATIONS } from '../../config/hiddenLocations';
+import { getSpecialEncounter } from '../../game/specialEncounters';
 import { QUESTS } from '../../config/quests';
 import { CURRENCY } from '../../config/text';
 import { useGame } from '../../state/gameStore';
@@ -19,6 +21,7 @@ export function JournalMenu() {
         {d.stats.caught}
       </div>
       <BadgeCase />
+      <DiscoveredPlaces />
       {QUESTS.map((q) => {
         const progress = Math.min(q.goal, q.progress(d));
         const done = progress >= q.goal;
@@ -119,6 +122,50 @@ function BadgeCase() {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+const RESULT_LABEL: Record<string, string> = {
+  CAUGHT: 'złapane',
+  DEFEATED: 'pokonane',
+  ESCAPED: 'uciekłeś — wciąż czeka',
+  LOST: 'przegrana — wciąż czeka',
+};
+
+/** Odkryte ukryte lokacje (Sprint 7) — tylko odkryte i widoczne po odkryciu; ze stanem spotkań specjalnych. */
+function DiscoveredPlaces() {
+  const p = useGame(useShallow((s) => ({ flags: s.flags, records: s.specialEncounters })));
+  const found = HIDDEN_LOCATIONS.filter((h) => h.visibleAfterDiscovery && p.flags[h.discoveryEventId]);
+  if (!found.length) return null;
+  return (
+    <div className="card badge-case" aria-label="Odkryte miejsca">
+      <b>Odkryte miejsca</b>
+      {found.map((h) => (
+        <div key={h.id} className="badge-row earned" data-hidden={h.id}>
+          <span className="badge-icon" aria-hidden="true">
+            ✦
+          </span>
+          <div className="badge-text">
+            <div>
+              <b>{getLocation(h.id)?.name ?? h.id}</b>
+            </div>
+            <div className="small muted">Wejście: {getLocation(h.parentLocationId)?.name ?? h.parentLocationId}</div>
+            {h.specialEncounterIds.map((id) => {
+              const def = getSpecialEncounter(id);
+              if (!def) return null;
+              const rec = p.records[id];
+              const done = !!p.flags[def.completionEventId];
+              const label = rec ? RESULT_LABEL[rec.result] : done ? 'ukończone' : 'jeszcze nie spotkane';
+              return (
+                <div key={id} className="small" data-special={id}>
+                  {def.name}: {label}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
