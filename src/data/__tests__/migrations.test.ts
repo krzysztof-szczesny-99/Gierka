@@ -234,3 +234,20 @@ describe('migracja zapisu v4 → v5 (Sprint 7: wyniki spotkań specjalnych)', ()
     expect(migrateSave(JSON.parse(JSON.stringify(out)))).toEqual(out);
   });
 });
+
+describe('migracja nie usuwa danych (Sprint 7)', () => {
+  it('starszy zapis z polami nowszej wersji (np. zbudowany z bieżącego stanu): odznaki, Próby, przejścia i wyniki spotkań zostają', () => {
+    const raw = {
+      ...v1Save(),
+      earnedBadges: ['odznaka-wiatru'],
+      completedChallenges: ['proba-wiatru'],
+      unlockedConnections: ['zagajnik-do-wzgorz'],
+      specialEncounters: { 'gaj-straznik': { result: 'CAUGHT', attempts: 1, completedAt: 10 } },
+      flags: { 'grove-done': true, 'static-done:gaj-straznik': true, 'badge:odznaka-wiatru': true },
+    };
+    const out = migrateSave(raw);
+    expect(out.version).toBe(SAVE_VERSION);
+    expect(out).toMatchObject({ earnedBadges: ['odznaka-wiatru'], completedChallenges: ['proba-wiatru'], unlockedConnections: ['zagajnik-do-wzgorz'] });
+    expect(out.specialEncounters).toEqual({ 'gaj-straznik': { result: 'CAUGHT', attempts: 1, completedAt: 10 } });
+  });
+});

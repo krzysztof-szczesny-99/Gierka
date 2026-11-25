@@ -69,12 +69,20 @@ function v3ToV4(data: AnyRecord): AnyRecord {
     .filter((k) => k.startsWith('badge:') && flags[k] === true)
     .map((k) => k.slice('badge:'.length))
     .filter((id) => !!getBadge(id));
-  return { ...data, earnedBadges: legacyBadges, completedChallenges: [], unlockedConnections: [], version: 4 };
+  // Pola obecne już w zapisie (np. zapis zbudowany z nowszego stanu) nie są nadpisywane — tylko uzupełniane.
+  const list = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+  return {
+    ...data,
+    earnedBadges: [...list(data.earnedBadges), ...legacyBadges],
+    completedChallenges: list(data.completedChallenges),
+    unlockedConnections: list(data.unlockedConnections),
+    version: 4,
+  };
 }
 
-/** v4 → v5: pusta lista wyników spotkań specjalnych. */
+/** v4 → v5: lista wyników spotkań specjalnych (pusta; istniejące wpisy zostają — porządkuje je normalizacja). */
 function v4ToV5(data: AnyRecord): AnyRecord {
-  return { ...data, specialEncounters: {}, version: 5 };
+  return { ...data, specialEncounters: isRecord(data.specialEncounters) ? data.specialEncounters : {}, version: 5 };
 }
 
 const STEPS: Record<number, (d: AnyRecord) => AnyRecord> = {
