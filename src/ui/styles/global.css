@@ -682,6 +682,29 @@ input {
 .quest.done {
   opacity: 0.6;
 }
+/* ─── odznaki (Dziennik) ─── */
+.badge-case {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.badge-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.badge-icon {
+  font-size: 1.4rem;
+  line-height: 1;
+  width: 1.6rem;
+  text-align: center;
+}
+.badge-row.earned .badge-icon {
+  color: #7cc4ef;
+}
+.badge-row.missing {
+  opacity: 0.75;
+}
 
 /* ─── komunikat (toast) i baner offline ─── */
 .toast {

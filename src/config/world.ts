@@ -15,7 +15,7 @@ export const LOCATION_TYPES: readonly LocationType[] = ['TOWN', 'CITY', 'ROUTE',
 
 /**
  * Wymagania (połączenia, lokacji, regionu). Sprawdzane na zapisie gry:
- * odznaki — flagi `badge:<id>`, przedmioty — torba, wydarzenia — flagi o podanej nazwie.
+ * odznaki — lista zdobytych odznak (earnedBadges, Sprint 6), przedmioty — torba, wydarzenia — flagi o podanej nazwie.
  */
 export interface Requirements {
   badges?: string[];
@@ -46,6 +46,13 @@ export interface LocationConnection {
   sourceTrigger: ConnectionTrigger;
   destinationSpawnPoint: string;
   requirements?: Requirements;
+  /**
+   * Przejście zamknięte, dopóki jego id nie trafi do zapisu (unlockedConnections) — otwiera je efekt odznaki
+   * (src/config/challenges.ts, BadgeDef.unlockEffects).
+   */
+  locked?: boolean;
+  /** Widoczna przeszkoda na polu wyzwalacza, dopóki przejście jest zamknięte. */
+  lockVisual?: 'fallen-tree';
   /** Komunikat, gdy przejście jest zablokowane (wymagania lub lokacja jeszcze niegotowa). */
   blockedMessage: string[];
 }
@@ -99,6 +106,7 @@ export const DEFAULT_SPAWN_POINT_ID = 'start';
 export const POLANA_ID = 'polana-startowa';
 export const ZAGAJNIK_ID = 'szepczacy-zagajnik';
 export const WZGORZA_ID = 'wzgorza-wiatru';
+export const STRAZNICA_ID = 'wietrzna-straznica';
 export const REGION_ID = 'kraina-szlakow';
 
 const HEAL_AT_POLANA: HealingPoint = { locationId: POLANA_ID, spawnPointId: 'stacja-opieki' };
@@ -111,7 +119,7 @@ export const WORLD: WorldDef = {
       name: 'Kraina Szlaków',
       generationReference: 'mixed',
       startLocationId: POLANA_ID,
-      locationIds: [POLANA_ID, ZAGAJNIK_ID, WZGORZA_ID],
+      locationIds: [POLANA_ID, ZAGAJNIK_ID, WZGORZA_ID, STRAZNICA_ID],
       unlockRequirements: {},
       status: 'IMPLEMENTED',
     },
@@ -157,6 +165,8 @@ export const WORLD: WorldDef = {
       spawnPoints: [
         { id: DEFAULT_SPAWN_POINT_ID, x: 3, y: 9, facing: 'right' },
         { id: 'z-polany', x: 2, y: 9, facing: 'right' },
+        { id: 'ze-straznicy', x: 24, y: 16, facing: 'left' },
+        { id: 'ze-wzgorz', x: 13, y: 1, facing: 'down' },
       ],
       connections: [
         {
@@ -168,13 +178,26 @@ export const WORLD: WorldDef = {
           blockedMessage: ['Ścieżka na Polanę jest na razie zamknięta.'],
         },
         {
+          // Zamknięte przejście (Sprint 6): otwiera je Odznaka Wiatru z Próby Wiatru w Wietrznej Strażnicy.
           id: 'zagajnik-do-wzgorz',
           sourceLocationId: ZAGAJNIK_ID,
           destinationLocationId: WZGORZA_ID,
           sourceTrigger: { kind: 'tile', x: 13, y: 0 },
           destinationSpawnPoint: 'z-zagajnika',
-          requirements: { events: ['droga-na-wzgorza'] },
-          blockedMessage: ['Ścieżkę na Wzgórza Wiatru zagradza zwalone drzewo.', 'Ta okolica jest jeszcze w przygotowaniu.'],
+          locked: true,
+          lockVisual: 'fallen-tree',
+          blockedMessage: [
+            'Ścieżkę na Wzgórza Wiatru zagradza zwalone drzewo.',
+            'Pomocnicy z Wietrznej Strażnicy uprzątną je dla tropicieli z Odznaką Wiatru.',
+          ],
+        },
+        {
+          id: 'zagajnik-do-straznicy',
+          sourceLocationId: ZAGAJNIK_ID,
+          destinationLocationId: STRAZNICA_ID,
+          sourceTrigger: { kind: 'tile', x: 25, y: 16 },
+          destinationSpawnPoint: 'z-zagajnika',
+          blockedMessage: ['Droga do Wietrznej Strażnicy jest na razie zamknięta.'],
         },
       ],
       encounterTableIds: ['zagajnik'],
@@ -186,21 +209,63 @@ export const WORLD: WorldDef = {
       healingPoint: HEAL_AT_POLANA,
     },
     {
-      // Tylko dane — mapa powstanie w kolejnych sprintach.
+      // Za zamkniętym przejściem z Zagajnika (Sprint 6) — dostępne po zdobyciu Odznaki Wiatru.
       id: WZGORZA_ID,
       name: 'Wzgórza Wiatru',
       regionId: REGION_ID,
       type: 'ROUTE',
-      status: 'PLANNED',
-      mapReference: null,
-      spawnPoints: [{ id: 'z-zagajnika', x: 0, y: 0, facing: 'up' }],
-      connections: [],
+      status: 'IMPLEMENTED',
+      mapReference: 'wzgorza',
+      spawnPoints: [
+        { id: DEFAULT_SPAWN_POINT_ID, x: 11, y: 13, facing: 'up' },
+        { id: 'z-zagajnika', x: 11, y: 14, facing: 'up' },
+      ],
+      connections: [
+        {
+          id: 'wzgorza-do-zagajnika',
+          sourceLocationId: WZGORZA_ID,
+          destinationLocationId: ZAGAJNIK_ID,
+          sourceTrigger: { kind: 'tile', x: 11, y: 15 },
+          destinationSpawnPoint: 'ze-wzgorz',
+          blockedMessage: ['Ścieżka do Zagajnika jest na razie zamknięta.'],
+        },
+      ],
+      encounterTableIds: ['wzgorza'],
+      availableEncounterMethods: ['grass'],
+      requiredBadges: [],
+      requiredItems: [],
+      requiredEvents: [],
+      hidden: false,
+      healingPoint: HEAL_AT_POLANA,
+    },
+    {
+      // Lokacja Próby (Sprint 6): arena Próby Wiatru — bez dzikich stworzeń.
+      id: STRAZNICA_ID,
+      name: 'Wietrzna Strażnica',
+      regionId: REGION_ID,
+      type: 'CHALLENGE',
+      status: 'IMPLEMENTED',
+      mapReference: 'straznica',
+      spawnPoints: [
+        { id: DEFAULT_SPAWN_POINT_ID, x: 5, y: 12, facing: 'up' },
+        { id: 'z-zagajnika', x: 1, y: 11, facing: 'right' },
+      ],
+      connections: [
+        {
+          id: 'straznica-do-zagajnika',
+          sourceLocationId: STRAZNICA_ID,
+          destinationLocationId: ZAGAJNIK_ID,
+          sourceTrigger: { kind: 'tile', x: 0, y: 11 },
+          destinationSpawnPoint: 'ze-straznicy',
+          blockedMessage: ['Droga do Zagajnika jest na razie zamknięta.'],
+        },
+      ],
       encounterTableIds: [],
       availableEncounterMethods: [],
       requiredBadges: [],
       requiredItems: [],
-      requiredEvents: ['droga-na-wzgorza'],
-      hidden: true,
+      requiredEvents: [],
+      hidden: false,
       healingPoint: HEAL_AT_POLANA,
     },
   ],

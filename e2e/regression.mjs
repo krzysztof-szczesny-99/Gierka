@@ -721,10 +721,13 @@ try {
 
 // ═════════════ Sprint 3: model świata, dwie lokacje, przejścia, zapis lokacji ═════════════
 /** Bieżąca wersja formatu zapisu (Sprint 4: v3). */
-const SAVE_V = 3;
+const SAVE_V = 4;
 const REGION = 'kraina-szlakow';
 const POLANA = 'polana-startowa';
 const ZAGAJNIK = 'szepczacy-zagajnik';
+const STRAZNICA = 'wietrzna-straznica';
+const WZGORZA = 'wzgorza-wiatru';
+const WZGORZA_SPECIES = { spearow: [9, 12], hoppip: [9, 12], mareep: [10, 12], swablu: [10, 13], rookidee: [11, 13] };
 const POLANA_TABLES = ['meadow', 'pond', 'rocks', 'grove'];
 const ZAGAJNIK_SPECIES = { caterpie: [3, 5], weedle: [3, 5], oddish: [4, 6], hoothoot: [4, 6], seedot: [4, 6], skwovet: [3, 5], fomantis: [5, 7] };
 /** Położenie w świecie: scena (mapa, pozycja), zapis w stanie gry, HUD, odnowienie spotkań. */
@@ -753,7 +756,7 @@ const idbSave = () => S(() => new Promise((resolve, reject) => {
       const row = q.result;
       const c = row?.data?.party?.[0] ?? null;
       const stworzenie = c ? { pokemon: c.pokemon, nature: c.nature ?? null, abilityId: c.abilityId ?? null, ability: c.ability ?? null, heldItemId: c.heldItemId ?? null, heldItem: c.heldItem ?? null, evolutionState: c.evolutionState ?? null, stats: c.stats } : null;
-      resolve(row ? { wersjaWiersza: row.version, wersjaDanych: row.data.version, region: row.data.player.regionId ?? null, lokacja: row.data.player.locationId ?? null, punkt: row.data.player.spawnPointId ?? null, mapId: row.data.player.mapId ?? null, poz: [row.data.player.x, row.data.player.y], pieniadze: row.data.player.money, stworzenie } : null);
+      resolve(row ? { wersjaWiersza: row.version, wersjaDanych: row.data.version, region: row.data.player.regionId ?? null, lokacja: row.data.player.locationId ?? null, punkt: row.data.player.spawnPointId ?? null, mapId: row.data.player.mapId ?? null, poz: [row.data.player.x, row.data.player.y], pieniadze: row.data.player.money, stworzenie, odznaki: row.data.earnedBadges ?? null, proby: row.data.completedChallenges ?? null, przejscia: row.data.unlockedConnections ?? null } : null);
     };
   };
 }));
@@ -848,7 +851,7 @@ try {
   record('W4', 'Zapis na mapie B i ponowne wczytanie (przeładowanie + Kontynuuj): gra wraca do Zagajnika w to samo miejsce', ok, { spot, przed: before, zapis: save, poWczytaniu: after, sterowanie: restored });
 } catch (e) { fail('W4', 'Zapis i wczytanie mapy B', e); }
 
-// ───────────── W5. Zablokowana ścieżka (lokacja w planach): komunikat i brak softlocka ─────────────
+// ───────────── W5. Zamknięta ścieżka (zwalone drzewo, Sprint 6): komunikat i brak softlocka ─────────────
 try {
   if (!w2ok) throw new Error('brak przejścia do Zagajnika z W2');
   await setStepRng('miss');
@@ -858,14 +861,15 @@ try {
   await page.locator('.dialog').waitFor({ timeout: 5000 });
   const text = (await page.locator('.dialog').textContent()) ?? '';
   const atExit = await where();
+  const obstacles = await S(() => window.__szlaki.game.scene.getScene('Overworld').lockObstacleInfo());
   await page.mouse.up();
   await closeDialogs();
   await idle(200);
   await hold(...OFF.down, 750);
   await idle(400);
   const after = await where();
-  const ok = /zwalone drzewo/.test(text) && same(atExit.poz, [13, 0]) && atExit.scena === ZAGAJNIK && after.scena === ZAGAJNIK && after.lokacja === ZAGAJNIK && after.poz[0] === 13 && after.poz[1] >= 1 && !after.przejscie && !(await page.locator('.dialog').count());
-  record('W5', 'Ścieżka na Wzgórza (PLANNED) zablokowana: komunikat, gracz zostaje w Zagajniku i odchodzi joystickiem (brak softlocka)', ok, { komunikat: text, naWyjsciu: atExit, poOdejsciu: after });
+  const ok = /zwalone drzewo/.test(text) && JSON.stringify(obstacles) === JSON.stringify([{ connectionId: 'zagajnik-do-wzgorz', x: 13, y: 0 }]) && same(atExit.poz, [13, 0]) && atExit.scena === ZAGAJNIK && after.scena === ZAGAJNIK && after.lokacja === ZAGAJNIK && after.poz[0] === 13 && after.poz[1] >= 1 && !after.przejscie && !(await page.locator('.dialog').count());
+  record('W5', 'Ścieżka na Wzgórza zamknięta (zwalone drzewo widoczne, bez odznaki): komunikat, gracz zostaje w Zagajniku i odchodzi joystickiem (brak softlocka)', ok, { komunikat: text, przeszkody: obstacles, naWyjsciu: atExit, poOdejsciu: after });
 } catch (e) { fail('W5', 'Zablokowana ścieżka', e); }
 
 // ───────────── W6. Powrót B → A joystickiem ─────────────
@@ -962,7 +966,7 @@ try {
   const resaved = await idbSave();
   const creatureOk = stored?.stworzenie?.ability && stored.stworzenie.abilityId === null && lead9.abilityId === stored.stworzenie.ability && lead9.neutralna && JSON.stringify(lead9.stats) === JSON.stringify(stored.stworzenie.stats) && lead9.evolutionState?.cancelledAtLevel === null && resaved?.stworzenie?.ability === null && resaved?.stworzenie?.nature === lead9.nature;
   const ok = stored?.wersjaDanych === 1 && stored?.mapId === 'polana' && same(stored.poz, [spot.x, spot.y]) && p.region === REGION && p.lokacja === POLANA && p.punkt === 'start' && same(p.zapisPoz, [spot.x, spot.y]) && same(p.poz, [spot.x, spot.y]) && money === 4321 && restored.ruszyl && resaved?.wersjaDanych === SAVE_V && resaved?.wersjaWiersza === SAVE_V && resaved?.lokacja === POLANA && resaved?.mapId === null && creatureOk;
-  record('W9', 'Stary zapis v1 (mapId, stworzenia bez natury) z IndexedDB: migracja do v3 — Polana, pozycja, pieniądze; natura neutralna, zdolność zachowana, statystyki bez zmian', ok, { pozycjaV1: spot, zapisV1: stored, poWczytaniu: p, pieniadze: money, prowadzacy: lead9, zapisPoMigracji: resaved, sterowanie: restored });
+  record('W9', 'Stary zapis v1 (mapId, stworzenia bez natury) z IndexedDB: migracja do bieżącej wersji (v4) — Polana, pozycja, pieniądze; natura neutralna, zdolność zachowana, statystyki bez zmian', ok, { pozycjaV1: spot, zapisV1: stored, poWczytaniu: p, pieniadze: money, prowadzacy: lead9, zapisPoMigracji: resaved, sterowanie: restored });
 } catch (e) { fail('W9', 'Migracja zapisu v1', e); }
 
 
@@ -1217,7 +1221,7 @@ try {
   await setStepRng('miss');
   const after = await party();
   const ok = row?.wersjaDanych === SAVE_V && JSON.stringify(after) === JSON.stringify(before) && before.some((c) => c.evolutionState?.evolvedFrom) && before.some((c) => c.heldItemId);
-  record('E6', 'Zapis v3 w IndexedDB i ponowne wczytanie: natura, zdolność, przedmiot i stan ewolucji bez zmian', ok, { wersja: row?.wersjaDanych, przed: before, po: after });
+  record('E6', 'Zapis (aktualna wersja) w IndexedDB i ponowne wczytanie: natura, zdolność, przedmiot i stan ewolucji bez zmian', ok, { wersja: row?.wersjaDanych, przed: before, po: after });
 } catch (e) { fail('E6', 'Zapis i wczytanie', e); }
 
 // ───────────── E7. Zgodność starego zapisu v2 (stworzenia bez natury, pola ability/heldItem) ─────────────
@@ -1248,7 +1252,7 @@ try {
   const resaved = await idbSave();
   const src = v2.party;
   const ok = stored?.wersjaDanych === 2 && after.length === src.length && after.every((c, i) => c.pokemon === src[i].pokemon && c.neutralna && c.abilityId === src[i].ability && c.heldItemId === src[i].heldItem && JSON.stringify(c.stats) === JSON.stringify(src[i].stats) && c.evolutionState && c.evolutionState.cancelledAtLevel === null) && restored.ruszyl && resaved?.wersjaDanych === SAVE_V && resaved?.stworzenie?.ability === null && resaved?.stworzenie?.nature;
-  record('E7', 'Stary zapis v2 z IndexedDB: stworzenia dostają naturę neutralną, zdolność i przedmiot zachowane, statystyki bez zmian; ponowny zapis w v3', ok, { zapisV2: stored, poWczytaniu: after, zapisPo: resaved, sterowanie: restored });
+  record('E7', 'Stary zapis v2 z IndexedDB: stworzenia dostają naturę neutralną, zdolność i przedmiot zachowane, statystyki bez zmian; ponowny zapis w bieżącej wersji (v4)', ok, { zapisV2: stored, poWczytaniu: after, zapisPo: resaved, sterowanie: restored });
 } catch (e) { fail('E7', 'Zgodność zapisu v2', e); }
 
 
@@ -1455,6 +1459,248 @@ try {
   const ok = flags.bartek && flags.iga && walked[1] <= 12 && noDialog && state.gameMode === 'EXPLORATION' && talk.join(' ').includes('Dobra walka') && starts === 0;
   record('S4', 'Zapis i wczytanie: pokonani trenerzy zostają pokonani — wzrok Igi nie wyzwala walki, Bartek mówi dialog po walce', ok, { flagi: flags, poPrzejsciu: walked, bezDialogu: noDialog, stan: state, rozmowa: talk, walk: starts });
 } catch (e) { fail('S4', 'Zapis pokonanych trenerów', e); }
+
+// ═════════════ Sprint 6: Próba Szlaku, odznaka i progresja świata ═════════════
+const WERA = 'przewodniczka-wera';
+const IGA_EVENT = 'trainer:zagajnik-iga:defeated';
+const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const challengeProgress = () => S(() => {
+  const g = window.__szlaki.stores.useGame.getState();
+  return { odznaki: g.earnedBadges, proby: g.completedChallenges, przejscia: g.unlockedConnections, ukonczona: !!g.flags['challenge:proba-wiatru:completed'], pieniadze: g.player.money, mocnyNapar: g.bag['herb-strong'] ?? 0 };
+});
+const sceneObstacles = () => S(() => window.__szlaki.game.scene.getScene('Overworld').lockObstacleInfo());
+const teleportTo = async (x, y, facing) => {
+  await S(({ x, y, facing }) => window.__szlaki.stores.bus.emit('teleport', { x, y, facing }), { x, y, facing });
+  await idle(300);
+};
+
+// ───────────── C1. Wejście do Próby bez wymagań: odmowa lidera, bez walki i bez nagrody ─────────────
+try {
+  await ensureMap();
+  await setStepRng('miss');
+  await S(() => window.__szlaki.stores.useGame.getState().healAll());
+  // Stan „bez wymagań”: Iga niepokonana (flaga wyłączona tylko na czas tego testu — przywracana w finally).
+  await S((f) => window.__szlaki.stores.useGame.getState().setFlag(f, false), IGA_EVENT);
+  await goTo(ZAGAJNIK, 22, 16, 'right');
+  const exit = await S(() => window.__szlaki.game.scene.getScene('Overworld').exitAt(25, 16));
+  await hold(...OFF.right, 1400, false); // 22 → 23 → 24 → 25 (wyjście do Wietrznej Strażnicy)
+  await waitArrival(STRAZNICA);
+  await page.mouse.up();
+  const arrived = await where();
+  const wera0 = await trainerAt(WERA);
+  await countBattleStarts();
+  const before = await challengeProgress();
+  // Wejście w bramę areny → wymagania niespełnione → odmowa (zwykły dialog, bez blokady spotkania).
+  await teleportTo(8, 10, 'up');
+  await hold(...OFF.up, 750, false); // 10 → 9 → 8 (brama)
+  await page.locator('.dialog').waitFor({ timeout: 8000 });
+  await page.mouse.up();
+  const gateState = await lockState();
+  const gatePos = await pos();
+  const gate = await readDialogs();
+  // Rozmowa z liderem (Akcja) — odmowa także przy rozmowie.
+  await teleportTo(8, 4, 'up');
+  await page.getByRole('button', { name: 'Akcja' }).click();
+  await page.locator('.dialog').waitFor({ timeout: 8000 });
+  const talkState = await lockState();
+  const talk = await readDialogs();
+  // Ponowne przejście przez bramę w tej samej wizycie: odmowa nie powtarza się przy każdym kroku.
+  await teleportTo(8, 7, 'down');
+  await hold(...OFF.down, 1100); // 7 → 8 → 9 (→ 10)
+  await idle(500);
+  const passed = await pos();
+  const noRepeat = (await page.locator('.dialog').count()) === 0;
+  const after = await challengeProgress();
+  const starts = await battleStarts();
+  await shot('c1-proba-bez-wymagan');
+  const ok =
+    exit === 'zagajnik-do-straznicy' && arrived.scena === STRAZNICA && arrived.mapa === 'straznica' && arrived.punkt === 'z-zagajnika' && same(arrived.poz, [1, 11]) && arrived.towarzysz && /Wietrzna Strażnica/.test(arrived.hud ?? '') &&
+    same([wera0.x, wera0.y], [8, 3]) && same(gatePos, [8, 8]) && gate.join(' ').includes('Przewodniczka Wera') && gate.join(' ').includes('Zielarkę Igę') && gateState.gameMode === 'EXPLORATION' && gateState.source === null && !gateState.inputLocked &&
+    talk.join(' ').includes('prowadzę Próbę Wiatru') && talkState.gameMode === 'EXPLORATION' && passed[1] >= 9 && noRepeat && starts === 0 && eq(after, before) && after.odznaki.length === 0;
+  record('C1', 'Wejście do Próby bez wymagań (Iga niepokonana): brama i rozmowa → odmowa lidera, bez walki, bez blokady i bez nagrody; przejście Zagajnik → Strażnica joystickiem', ok, { wyjscie: exit, przybycie: arrived, wera: wera0, brama: { poz: gatePos, stan: gateState, dialog: gate }, rozmowa: { stan: talkState, dialog: talk }, ponownieBrama: { poz: passed, bezDialogu: noRepeat }, przed: before, po: after, walk: starts });
+} catch (e) { fail('C1', 'Wejście do Próby bez wymagań', e); }
+finally {
+  await S((f) => window.__szlaki.stores.useGame.getState().setFlag(f, true), IGA_EVENT).catch(() => undefined);
+}
+
+// ───────────── C2. Wejście z wymaganiami: dialog, walka (ten sam silnik, zablokowane inne interakcje); przegrana bez nagrody ─────────────
+try {
+  await ensureMap();
+  await setStepRng('miss');
+  await S(() => window.__szlaki.stores.useGame.getState().healAll());
+  await goTo(STRAZNICA, 8, 10, 'up');
+  await resetCooldown();
+  await countBattleStarts();
+  const before = await challengeProgress();
+  // Przegrana deterministycznie: drużyna z 1 PŻ, a stworzenia lidera zawsze szybsze i silniejsze.
+  await S(() => window.__szlaki.stores.useGame.setState((s) => ({ party: s.party.map((c) => ({ ...c, hp: 1 })) })));
+  await hold(...OFF.up, 750, false); // 10 → 9 → 8 (brama): Próba dostępna
+  await page.locator('.dialog').waitFor({ timeout: 10000 });
+  const at = await pos();
+  await idle(800); // palec nadal na joysticku
+  const frozen = await pos();
+  await page.mouse.up();
+  const during = await lockState();
+  const weraDuring = await trainerAt(WERA);
+  const other = await S(() => window.__szlaki.stores.useUi.getState().tryStartEncounter('static:test'));
+  const firstLine = ((await page.locator('.dialog').textContent()) ?? '').trim();
+  await readDialogs();
+  await waitBattleMode();
+  const battle = await S(() => {
+    const e = window.__szlaki.stores.useBattle.getState().engine;
+    return { kind: e.sides[1].kind, name: e.sides[1].name, ai: e.sides[1].ai, team: e.sides[1].party.map((c) => ({ p: c.pokemon, lvl: c.level, nature: c.nature, ability: c.abilityId, item: c.heldItemId, moves: c.moves.map((m) => m.name) })) };
+  });
+  const runDisabled = await page.getByRole('button', { name: 'Ucieczka' }).isDisabled();
+  const otherInBattle = await S(() => window.__szlaki.stores.useUi.getState().tryStartEncounter('static:test'));
+  await shot('c2-proba-walka');
+  await S(() => {
+    const B = window.__szlaki.stores.useBattle;
+    const engine = structuredClone(B.getState().engine);
+    engine.sides[0].party.forEach((c) => { c.hp = Math.min(c.hp, 1); });
+    engine.sides[1].party.forEach((c) => { c.stats = { ...c.stats, spe: 999, atk: 999, spa: 999 }; });
+    B.setState({ engine });
+  });
+  await fightToEnd(false);
+  const outcome = await S(() => window.__szlaki.stores.useBattle.getState().engine.outcome);
+  await page.getByRole('button', { name: 'Dalej' }).click();
+  await afterBattleBackOnMap();
+  if (outcome === 'lose') await waitArrival(POLANA);
+  const p = await where();
+  const after = await challengeProgress();
+  const starts = await battleStarts();
+  const ok =
+    same(at, [8, 8]) && same(frozen, at) && during.gameMode === 'ENCOUNTER_STARTING' && during.inputLocked && during.source === 'trainer:przewodniczka-wera' && same([weraDuring.x, weraDuring.y], [8, 3]) && other === null && otherInBattle === null &&
+    firstLine.includes('Przewodniczka Wera') && firstLine.includes('Wiatr przywiał') &&
+    battle.kind === 'trainer' && battle.name === 'Przewodniczka Wera' && battle.ai === 'AGGRESSIVE' && eq(battle.team.map((t) => t.p), ['spearow', 'swablu', 'pidgeotto']) && eq(battle.team.map((t) => t.lvl), [11, 11, 13]) && battle.team[2].item === 'power-band' && eq(battle.team[2].moves, ['gust', 'quick-attack', 'wing-attack', 'sand-attack']) && runDisabled &&
+    starts === 1 && after.odznaki.length === 0 && after.proby.length === 0 && after.przejscia.length === 0 && !after.ukonczona && after.mocnyNapar === before.mocnyNapar && after.pieniadze < before.pieniadze &&
+    p.lokacja === POLANA && p.punkt === 'stacja-opieki';
+  record('C2', 'Próba z wymaganiami: brama → dialog przy zamrożonym graczu → jedna walka z liderem (AGGRESSIVE, 3 stworzenia, bez ucieczki), inne interakcje zablokowane; przegrana → Stacja Opieki, bez odznaki i nagrody', outcome === 'lose' ? ok : 'INFO', { brama: at, palecTrzymany: frozen, blokada: during, wera: weraDuring, inneSpotkanie: other, inneWWalce: otherInBattle, pierwszaLinia: firstLine, walka: battle, ucieczkaZablokowana: runDisabled, wynik: outcome, po: p, postepPrzed: before, postepPo: after, walk: starts });
+} catch (e) { fail('C2', 'Próba: walka i przegrana', e); }
+
+// ───────────── C3. Zwycięstwo: odznaka, wydarzenie, odblokowanie przejścia i nagroda ─────────────
+try {
+  await ensureMap();
+  await setStepRng('miss');
+  await S(() => window.__szlaki.stores.useGame.getState().healAll());
+  await goTo(STRAZNICA, 8, 4, 'up');
+  await countBattleStarts();
+  const before = await challengeProgress();
+  await page.getByRole('button', { name: 'Akcja' }).click();
+  await page.locator('.dialog').waitFor({ timeout: 8000 });
+  await idle(400);
+  const firstLine = ((await page.locator('.dialog').textContent()) ?? '').trim();
+  const during = await lockState();
+  await readDialogs();
+  const res = await winTrainerBattle();
+  const after = await challengeProgress();
+  const p = await where();
+  const starts = await battleStarts();
+  const notes = res.notes.join(' ');
+  await shot('c3-odznaka');
+  const ok =
+    firstLine.includes('Wiatr przywiał') && during.gameMode === 'ENCOUNTER_STARTING' && during.source === 'trainer:przewodniczka-wera' && res.outcome === 'win' &&
+    notes.includes('Pokonujesz: Przewodniczka Wera') && notes.includes('Zdobywasz odznakę: Odznaka Wiatru') && notes.includes('Otwiera się przejście: ścieżka z Szepczącego Zagajnika na Wzgórza Wiatru') && notes.includes('nie dały się porwać wichurze') &&
+    eq(after.odznaki, ['odznaka-wiatru']) && eq(after.proby, ['proba-wiatru']) && eq(after.przejscia, ['zagajnik-do-wzgorz']) && after.ukonczona &&
+    after.pieniadze - before.pieniadze === 800 && after.mocnyNapar - before.mocnyNapar === 2 && starts === 1 && p.lokacja === STRAZNICA;
+  record('C3', 'Zwycięstwo w Próbie: Odznaka Wiatru, zapisane wydarzenie ukończenia, odblokowane przejście, nagroda (+800, Mocny napar ×2), dialog lidera', ok, { pierwszaLinia: firstLine, blokada: during, wynik: res, przed: before, po: after, gdzie: p, walk: starts });
+} catch (e) { fail('C3', 'Zwycięstwo w Próbie', e); }
+
+// ───────────── C4. Brak duplikacji: rozmowa, brama, wymuszone zdarzenie, ponowne przyznanie — nic nie dodają; Dziennik ─────────────
+try {
+  await ensureMap();
+  await setStepRng('miss');
+  await countBattleStarts();
+  const before = await challengeProgress();
+  await goTo(STRAZNICA, 8, 4, 'up');
+  await page.getByRole('button', { name: 'Akcja' }).click();
+  await page.locator('.dialog').waitFor({ timeout: 8000 });
+  const talkState = await lockState();
+  const talk = await readDialogs();
+  await teleportTo(8, 10, 'up');
+  await hold(...OFF.up, 1100); // przez bramę areny (10 → 9 → 8 → 7)
+  await idle(500);
+  const gate = await pos();
+  const noDialog = (await page.locator('.dialog').count()) === 0;
+  await S((id) => window.__szlaki.stores.bus.emit('trainer-event', { trainerId: id }), WERA);
+  await idle(500);
+  const noDialog2 = (await page.locator('.dialog').count()) === 0;
+  const again = await S(() => window.__szlaki.stores.useGame.getState().completeChallenge('proba-wiatru'));
+  await page.locator('.hud-menu button', { hasText: 'Dziennik' }).click();
+  await page.locator('.modal').waitFor();
+  const row = page.locator('.badge-row[data-badge="odznaka-wiatru"]');
+  const journal = { klasa: (await row.getAttribute('class')) ?? '', tekst: ((await row.textContent()) ?? '').trim() };
+  await shot('c4-dziennik-odznaki');
+  await page.locator('.modal-close').click();
+  const after = await challengeProgress();
+  const starts = await battleStarts();
+  const ok =
+    talk.join(' ').includes('Odznaka Wiatru dobrze na Tobie wygląda') && talkState.gameMode === 'EXPLORATION' && gate[1] <= 8 && noDialog && noDialog2 && again === null &&
+    eq(after, before) && starts === 0 && journal.klasa.includes('earned') && journal.tekst.includes('Otwiera: ścieżka z Szepczącego Zagajnika na Wzgórza Wiatru');
+  record('C4', 'Brak duplikacji nagrody: powtórna rozmowa = dialog po Próbie, brama i wymuszone zdarzenie bez walki, ponowne przyznanie odrzucone; Dziennik pokazuje zdobytą odznakę', ok, { rozmowa: talk, stan: talkState, brama: gate, bezDialogu: noDialog, bezDialoguPoZdarzeniu: noDialog2, ponownePrzyznanie: again, dziennik: journal, przed: before, po: after, walk: starts });
+} catch (e) { fail('C4', 'Brak duplikacji nagrody', e); }
+
+// ───────────── C5. Odblokowane przejście: drzewo zniknęło, Zagajnik → Wzgórza Wiatru (nowa mapa i tabela), powrót ─────────────
+try {
+  await ensureMap();
+  await setStepRng('miss');
+  await goTo(ZAGAJNIK, 13, 2, 'up');
+  const obstacles = await sceneObstacles();
+  const exit = await S(() => window.__szlaki.game.scene.getScene('Overworld').exitAt(13, 0));
+  await hold(...OFF.up, 1100, false); // 2 → 1 → 0 (otwarte przejście)
+  await waitArrival(WZGORZA);
+  await page.mouse.up();
+  const arrived = await where();
+  const save = await idbSave();
+  await shot('c5-wzgorza');
+  const enc = await grassEncounter();
+  const foe = await enemy();
+  const range = WZGORZA_SPECIES[foe.pokemon];
+  const lvlOk = !!range && foe.level >= range[0] + (foe.mighty ? 3 : 0) && foe.level <= range[1] + (foe.mighty ? 3 : 0);
+  const outcome = await fleeFast();
+  await teleportTo(11, 13, 'down');
+  await hold(...OFF.down, 900, false); // 13 → 14 → 15 (wyjście do Zagajnika)
+  await waitArrival(ZAGAJNIK);
+  await page.mouse.up();
+  const back = await where();
+  const ok =
+    obstacles.length === 0 && exit === 'zagajnik-do-wzgorz' && arrived.scena === WZGORZA && arrived.mapa === 'wzgorza' && arrived.punkt === 'z-zagajnika' && same(arrived.poz, [11, 14]) && arrived.kierunek === 'up' && arrived.towarzysz && /Wzgórza Wiatru/.test(arrived.hud ?? '') && save?.lokacja === WZGORZA &&
+    enc.zdarzenia.length === 1 && enc.zdarzenia[0].table === 'wzgorza' && enc.zdarzenia[0].zoneId === 'wietrzne-zbocza' && lvlOk && outcome === 'fled' &&
+    back.scena === ZAGAJNIK && back.punkt === 'ze-wzgorz' && same(back.poz, [13, 1]);
+  record('C5', 'Odblokowane przejście: zwalone drzewo zniknęło, joystickiem Zagajnik → Wzgórza Wiatru (zapis od razu), spotkanie z tabeli „wzgorza”, powrót do Zagajnika', ok, { przeszkody: obstacles, wyjscie: exit, przybycie: arrived, zapis: save, spotkanie: enc, przeciwnik: foe, zakres: range, ucieczka: outcome, powrot: back });
+} catch (e) { fail('C5', 'Odblokowane przejście', e); }
+
+// ───────────── C6. Zapis i ponowne wczytanie: odznaka, ukończona Próba i otwarte przejście zostają ─────────────
+try {
+  await ensureMap();
+  await setStepRng('miss');
+  const before = await challengeProgress();
+  await controlRestored(); // ruch → autozapis
+  await idle(2800);
+  const stored = await idbSave();
+  await page.reload();
+  await page.getByRole('button', { name: /Kontynuuj/ }).click({ timeout: 15000 });
+  await waitJoystick();
+  await setStepRng('miss');
+  const loaded = await challengeProgress();
+  await countBattleStarts();
+  await goTo(ZAGAJNIK, 13, 2, 'up');
+  const obstacles = await sceneObstacles();
+  await hold(...OFF.up, 1100, false);
+  await waitArrival(WZGORZA);
+  await page.mouse.up();
+  const there = await where();
+  await goTo(STRAZNICA, 8, 4, 'up');
+  await page.getByRole('button', { name: 'Akcja' }).click();
+  await page.locator('.dialog').waitFor({ timeout: 8000 });
+  const talk = await readDialogs();
+  await ensureMap();
+  const final = await challengeProgress();
+  const starts = await battleStarts();
+  const ok =
+    stored?.wersjaDanych === SAVE_V && eq(stored.odznaki, ['odznaka-wiatru']) && eq(stored.proby, ['proba-wiatru']) && eq(stored.przejscia, ['zagajnik-do-wzgorz']) &&
+    eq(loaded, before) && obstacles.length === 0 && there.scena === WZGORZA && talk.join(' ').includes('Odznaka Wiatru dobrze') && starts === 0 && eq(final, before);
+  record('C6', 'Zapis i wczytanie (przeładowanie + Kontynuuj): odznaka, ukończona Próba i otwarte przejście w IndexedDB i w grze; lider bez walki, bez drugiej nagrody', ok, { zapis: stored, przed: before, poWczytaniu: loaded, przeszkody: obstacles, wzgorza: there, rozmowa: talk, koniec: final, walk: starts });
+} catch (e) { fail('C6', 'Zapis Próby i ponowne wczytanie', e); }
 
 // ───────────── U1. Wersja i ręczne sprawdzenie aktualizacji (Menu) ─────────────
 try {

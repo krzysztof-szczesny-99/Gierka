@@ -19,7 +19,8 @@ import { consumeAction, releaseInput, resetVirtualInput, virtualInput } from '..
 import type { LocationConnection, LocationDef } from '../../config/world';
 import { saveNow } from '../../data/saveGame';
 import { TEST_MAP, type MapDef, type StaticEncounterDef, type ZoneDef } from '../maps/testMap';
-import { checkTravel, connectionAt, getLocation, mapOf, resolveSafeEntry, startLocation, type WorldPosition } from '../world';
+import { checkTravel, connectionAt, getLocation, isConnectionOpen, mapOf, resolveSafeEntry, startLocation, type WorldPosition } from '../world';
+import { challengeState, getChallenge } from '../challenges';
 import { approachPath, canChallenge, eventTriggerAt, facingTo, seesPlayer, sightLine, talkKind, trainersIn, type TalkKind } from '../trainers';
 import type { TrainerTrigger } from '../eventBus';
 import {
@@ -32,7 +33,7 @@ import {
   stepDurationMs,
   type Point,
 } from '../movement';
-import { ensureCreatureTexture, TILESET_KEY, type CreatureTexture } from '../textures';
+import { ensureCreatureTexture, FALLEN_TREE_KEY, TILESET_KEY, type CreatureTexture } from '../textures';
 import { tileDef, TILE_SIZE, WATER_ALT_INDEX } from '../tiles';
 
 const WATER_INDEX = 3;
@@ -102,6 +103,10 @@ export class OverworldScene extends Phaser.Scene {
   private followerReq = 0;
   private actors: StaticActor[] = [];
   private trainers: TrainerActor[] = [];
+  /** Widoczne przeszkody na zamkniętych przejściach (Sprint 6) — klucz: id przejścia. */
+  private lockObstacles = new Map<string, Phaser.GameObjects.Image>();
+  /** Odmowa lidera po wejściu na arenę bez wymagań — raz na wizytę w lokacji (rozmowa zawsze działa). */
+  private refusalShown = new Set<string>();
   private cursors: Phaser.Types.Input.Keyboard.CursorKeys | null = null;
   private keyAction: Phaser.Input.Keyboard.Key | null = null;
   private keyRun: Phaser.Input.Keyboard.Key | null = null;
@@ -129,6 +134,8 @@ export class OverworldScene extends Phaser.Scene {
     this.followerReq += 1;
     this.actors = [];
     this.trainers = [];
+    this.lockObstacles = new Map();
+    this.refusalShown = new Set();
     this.layer = null;
     this.waterAlt = false;
     this.cleanups = [];
@@ -186,6 +193,7 @@ export class OverworldScene extends Phaser.Scene {
     this.time.addEvent({ delay: 650, loop: true, callback: () => this.animateWater() });
     this.spawnStaticEncounters();
     this.spawnTrainers();
+    this.refreshLockObstacles();
     useUi.getState().protectSteps(ENCOUNTER_CONFIG.mapEnterSafeSteps);
 
     // Towarzysz (prowadzący drużynę)
@@ -193,6 +201,7 @@ export class OverworldScene extends Phaser.Scene {
 
     const unsubGame = useGame.subscribe((s, prev) => {
       if (s.party !== prev.party || s.settings !== prev.settings) this.refreshFollower();
+      if (s.unlockedConnections !== prev.unlockedConnections) this.refreshLockObstacles();
     });
     // Podczas walki usypiamy pętlę Phasera (oszczędność baterii) i budzimy po powrocie.
     const unsubUi = useUi.subscribe((s, prev) => {
@@ -376,7 +385,7 @@ export class OverworldScene extends Phaser.Scene {
 
   private useConnection(conn: LocationConnection): void {
     const g = useGame.getState();
-    const check = checkTravel(conn, { flags: g.flags, bag: g.bag });
+    const check = checkTravel(conn, { flags: g.flags, bag: g.bag, earnedBadges: g.earnedBadges, unlockedConnections: g.unlockedConnections });
     if (!check.ok) {
       this.setHeroFrame(false);
       bus.emit('dialog', { lines: check.message });
@@ -414,6 +423,36 @@ export class OverworldScene extends Phaser.Scene {
   /** Czy pole jest wyzwalaczem przejścia (diagnostyka i testy). */
   exitAt(x: number, y: number): string | null {
     return connectionAt(this.location, x, y)?.id ?? null;
+  }
+
+  /**
+   * Przeszkody na zamkniętych przejściach (np. zwalone drzewo): widoczne, dopóki przejście nie zostanie
+   * odblokowane odznaką. Odświeżane przy wejściu na mapę i przy zmianie listy odblokowań w zapisie.
+   */
+  private refreshLockObstacles(): void {
+    if (this.disposed) return;
+    const unlocked = useGame.getState().unlockedConnections;
+    for (const c of this.location.connections) {
+      const shown = this.lockObstacles.get(c.id);
+      const needed = !!c.lockVisual && !isConnectionOpen(c, { unlockedConnections: unlocked });
+      if (needed && !shown) {
+        const { x, y } = c.sourceTrigger;
+        const img = this.add.image(tileCenterX(x), tileBottomY(y), FALLEN_TREE_KEY).setOrigin(0.5, 1);
+        img.setDepth(tileBottomY(y) + 5);
+        this.lockObstacles.set(c.id, img);
+      } else if (!needed && shown) {
+        shown.destroy();
+        this.lockObstacles.delete(c.id);
+      }
+    }
+  }
+
+  /** Widoczne przeszkody na zamkniętych przejściach (diagnostyka i testy E2E). */
+  lockObstacleInfo(): { connectionId: string; x: number; y: number }[] {
+    return [...this.lockObstacles.keys()].map((id) => {
+      const c = this.location.connections.find((k) => k.id === id)!;
+      return { connectionId: id, x: c.sourceTrigger.x, y: c.sourceTrigger.y };
+    });
   }
 
   // ───────────────────────────── interakcje ─────────────────────────────
@@ -663,6 +702,21 @@ export class OverworldScene extends Phaser.Scene {
   private beginTrainer(t: TrainerActor, trigger: TrainerTrigger): boolean {
     if (this.disposed || t.engaged) return false;
     const flags = useGame.getState().flags;
+    // Lider Próby (Sprint 6): najpierw stan Próby — wymagania niespełnione → odmowa bez walki.
+    const challenge = t.def.challengeId ? getChallenge(t.def.challengeId) : undefined;
+    if (challenge) {
+      const state = challengeState(challenge, useGame.getState());
+      if (state === 'UNAVAILABLE') return false;
+      if (state === 'LOCKED') {
+        if (trigger !== 'talk' && this.refusalShown.has(t.def.id)) return false;
+        this.refusalShown.add(t.def.id);
+        this.faceTrainer(t, facingTo({ x: t.tx, y: t.ty }, { x: this.tx, y: this.ty }));
+        this.setHeroFrame(false);
+        bus.emit('dialog', { lines: challenge.dialogue.locked.map((l) => `${t.def.name}: „${l}”`) });
+        return true;
+      }
+      if (state === 'COMPLETED' && trigger !== 'talk') return false;
+    }
     let kind: TalkKind;
     if (trigger === 'talk') kind = talkKind(t.def, flags);
     else if (canChallenge(t.def, flags)) kind = 'battle';
@@ -685,8 +739,8 @@ export class OverworldScene extends Phaser.Scene {
     if (trigger !== 'talk') this.showAlertAt(t.container.x, t.container.y);
 
     const player = { x: this.tx, y: this.ty };
-    const path =
-      approachPath({ x: t.tx, y: t.ty }, player, (x, y) => this.trainerCanWalk(t, x, y)) ?? [];
+    // Lider czeka na arenie (nie podchodzi); zwykły trener podchodzi, jeśli ma bezpieczną ścieżkę.
+    const path = challenge ? [] : (approachPath({ x: t.tx, y: t.ty }, player, (x, y) => this.trainerCanWalk(t, x, y)) ?? []);
     const afterWalk = () => {
       if (this.disposed || useUi.getState().activeEncounterId !== encounterId) return;
       this.faceTrainer(t, facingTo({ x: t.tx, y: t.ty }, player));

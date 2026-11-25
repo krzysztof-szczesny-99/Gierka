@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ENCOUNTER_TABLES } from '../../config/encounters';
-import { POLANA_ID, REGION_ID, WORLD, WZGORZA_ID, ZAGAJNIK_ID, type LocationDef, type WorldDef } from '../../config/world';
+import { POLANA_ID, REGION_ID, STRAZNICA_ID, WORLD, WZGORZA_ID, ZAGAJNIK_ID, type LocationDef, type WorldDef } from '../../config/world';
 import { encounterZoneAt } from '../encounterZones';
 import { MAPS } from '../maps';
 import { isWalkable } from '../movement';
@@ -52,15 +52,16 @@ describe('model świata: dane', () => {
   it('region i lokacje mają wymagane pola; Polana Startowa ma stabilny identyfikator', () => {
     const region = getRegion(REGION_ID)!;
     expect(region).toMatchObject({ startLocationId: POLANA_ID, status: 'IMPLEMENTED', generationReference: 'mixed' });
-    expect(region.locationIds).toEqual([POLANA_ID, ZAGAJNIK_ID, WZGORZA_ID]);
+    expect(region.locationIds).toEqual([POLANA_ID, ZAGAJNIK_ID, WZGORZA_ID, STRAZNICA_ID]);
     expect(POLANA_ID).toBe('polana-startowa');
     for (const l of WORLD.locations) {
       for (const key of ['id', 'name', 'regionId', 'type', 'status', 'mapReference', 'connections', 'spawnPoints', 'encounterTableIds', 'availableEncounterMethods', 'requiredBadges', 'requiredItems', 'requiredEvents', 'hidden', 'healingPoint']) {
         expect(key in l).toBe(true);
       }
     }
-    expect(WORLD.locations.filter((l) => l.status === 'IMPLEMENTED').map((l) => l.id)).toEqual([POLANA_ID, ZAGAJNIK_ID]);
-    expect(getLocation(WZGORZA_ID)?.status).toBe('PLANNED');
+    // Sprint 6: Wzgórza Wiatru (za zamkniętym przejściem) i Wietrzna Strażnica (lokacja Próby) są grywalne.
+    expect(WORLD.locations.filter((l) => l.status === 'IMPLEMENTED').map((l) => l.id)).toEqual([POLANA_ID, ZAGAJNIK_ID, WZGORZA_ID, STRAZNICA_ID]);
+    expect(getLocation(STRAZNICA_ID)).toMatchObject({ type: 'CHALLENGE', encounterTableIds: [], mapReference: 'straznica' });
     expect(startPosition()).toMatchObject({ regionId: REGION_ID, locationId: POLANA_ID, spawnPointId: 'start', x: 8, y: 7 });
   });
 
@@ -76,7 +77,7 @@ describe('model świata: dane', () => {
     const h = g.length, w = g[0].length;
     const edgeWalkable: string[] = [];
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if ((x === 0 || y === 0 || x === w - 1 || y === h - 1) && isWalkable(g, x, y)) edgeWalkable.push(`${x},${y}`);
-    expect(edgeWalkable.sort()).toEqual(['0,9', '13,0']);
+    expect(edgeWalkable.sort()).toEqual(['0,9', '13,0', '25,16']); // Polana, Wzgórza (zamknięte), Strażnica
     for (const k of edgeWalkable) {
       const [x, y] = k.split(',').map(Number);
       expect(connectionAt(ZAGAJNIK, x, y)).not.toBeNull();
@@ -111,18 +112,37 @@ describe('połączenia i przejścia', () => {
     if (t.ok) expect(t.position).toEqual({ regionId: REGION_ID, locationId: POLANA_ID, spawnPointId: 'z-zagajnika', x: 38, y: 14, facing: 'left' });
   });
 
-  it('ścieżka na Wzgórza (lokacja PLANNED) jest zablokowana z komunikatem', () => {
-    const t = checkTravel(connectionAt(ZAGAJNIK, 13, 0)!, NO_PROGRESS);
+  it('ścieżka na Wzgórza jest zamknięta (zwalone drzewo) do odblokowania przejścia; po odblokowaniu prowadzi na Wzgórza', () => {
+    const conn = connectionAt(ZAGAJNIK, 13, 0)!;
+    expect(conn).toMatchObject({ id: 'zagajnik-do-wzgorz', locked: true, lockVisual: 'fallen-tree' });
+    const t = checkTravel(conn, NO_PROGRESS);
     expect(t.ok).toBe(false);
     if (!t.ok) {
-      expect(t.reason).toBe('not-implemented');
+      expect(t.reason).toBe('locked');
       expect(t.message.join(' ')).toContain('zwalone drzewo');
     }
+    // Sama odznaka bez odblokowania przejścia nie otwiera drogi — liczy się lista unlockedConnections.
+    expect(checkTravel(conn, { ...NO_PROGRESS, earnedBadges: ['odznaka-wiatru'] })).toMatchObject({ ok: false, reason: 'locked' });
+    const open = checkTravel(conn, { ...NO_PROGRESS, unlockedConnections: ['zagajnik-do-wzgorz'] });
+    expect(open.ok).toBe(true);
+    if (open.ok) expect(open.position).toEqual({ regionId: REGION_ID, locationId: WZGORZA_ID, spawnPointId: 'z-zagajnika', x: 11, y: 14, facing: 'up' });
+    // Powrót ze Wzgórz jest zawsze otwarty.
+    const back = checkTravel(connectionAt(getLocation(WZGORZA_ID)!, 11, 15)!, NO_PROGRESS);
+    expect(back.ok && back.position).toMatchObject({ locationId: ZAGAJNIK_ID, spawnPointId: 'ze-wzgorz', x: 13, y: 1, facing: 'down' });
   });
 
-  it('wymagania połączenia i lokacji: odznaki (flagi badge:), przedmioty (torba), wydarzenia (flagi)', () => {
+  it('Zagajnik ↔ Wietrzna Strażnica: przejście otwarte w obie strony', () => {
+    const there = checkTravel(connectionAt(ZAGAJNIK, 25, 16)!, NO_PROGRESS);
+    expect(there.ok && there.position).toMatchObject({ locationId: STRAZNICA_ID, spawnPointId: 'z-zagajnika', x: 1, y: 11, facing: 'right' });
+    const back = checkTravel(connectionAt(getLocation(STRAZNICA_ID)!, 0, 11)!, NO_PROGRESS);
+    expect(back.ok && back.position).toMatchObject({ locationId: ZAGAJNIK_ID, spawnPointId: 'ze-straznicy', x: 24, y: 16, facing: 'left' });
+  });
+
+  it('wymagania połączenia i lokacji: odznaki (zdobyte odznaki w zapisie), przedmioty (torba), wydarzenia (flagi)', () => {
     expect(requirementsMet({ badges: ['las'] }, NO_PROGRESS)).toBe(false);
-    expect(requirementsMet({ badges: ['las'] }, { flags: { 'badge:las': true }, bag: {} })).toBe(true);
+    expect(requirementsMet({ badges: ['las'] }, { flags: {}, bag: {}, earnedBadges: ['las'] })).toBe(true);
+    // Sprint 6: odznaki nie są już flagami — dawne flagi badge: przenosi migracja zapisu v3 → v4.
+    expect(requirementsMet({ badges: ['las'] }, { flags: { 'badge:las': true }, bag: {} })).toBe(false);
     expect(requirementsMet({ items: ['potion'] }, { flags: {}, bag: { potion: 0 } })).toBe(false);
     expect(requirementsMet({ items: ['potion'] }, { flags: {}, bag: { potion: 2 } })).toBe(true);
     expect(requirementsMet({ events: ['most'] }, { flags: { most: true }, bag: {} })).toBe(true);
@@ -132,6 +152,9 @@ describe('połączenia i przejścia', () => {
     z.requirements = { events: ['most-naprawiony'] };
     expect(checkTravel(z, NO_PROGRESS, w)).toMatchObject({ ok: false, reason: 'requirements' });
     expect(checkTravel(z, { flags: { 'most-naprawiony': true }, bag: {} }, w).ok).toBe(true);
+    z.requirements = { badges: ['odznaka-wiatru'] };
+    expect(checkTravel(z, NO_PROGRESS, w)).toMatchObject({ ok: false, reason: 'requirements' });
+    expect(checkTravel(z, { flags: {}, bag: {}, earnedBadges: ['odznaka-wiatru'] }, w).ok).toBe(true);
   });
 
   it('punkt leczenia Zagajnika to Stacja Opieki na Polanie (przegrana przenosi między mapami)', () => {
@@ -143,7 +166,7 @@ describe('połączenia i przejścia', () => {
 
 describe('brak softlocka', () => {
   it('z każdego punktu pojawienia się da się dojść do każdego wyjścia lokacji', () => {
-    for (const loc of [POLANA, ZAGAJNIK]) {
+    for (const loc of WORLD.locations.filter((l) => l.status === 'IMPLEMENTED')) {
       for (const sp of loc.spawnPoints) {
         const seen = reachable(loc, sp);
         for (const c of loc.connections) expect(seen.has(`${c.sourceTrigger.x},${c.sourceTrigger.y}`)).toBe(true);
@@ -159,7 +182,10 @@ describe('brak softlocka', () => {
     expect(resolveSafeEntry({ ...p, x: 0, y: 9 })).toMatchObject({ locationId: ZAGAJNIK_ID, x: 2, y: 9 }); // wyzwalacz wyjścia
     expect(resolveSafeEntry({ ...p, x: 99, y: 99, spawnPointId: 'nie-ma' })).toMatchObject({ locationId: ZAGAJNIK_ID, spawnPointId: 'start', x: 3, y: 9 });
     expect(resolveSafeEntry({ ...p, locationId: 'nie-ma-takiej', x: 3, y: 3 })).toEqual(startPosition());
-    expect(resolveSafeEntry({ ...p, locationId: WZGORZA_ID, x: 0, y: 0 })).toEqual(startPosition()); // lokacja bez mapy
+    // Lokacja bez mapy (PLANNED) — w danych gry już takiej nie ma, więc sprawdzamy na kopii świata.
+    const w = clone();
+    Object.assign(w.locations.find((l) => l.id === WZGORZA_ID)!, { status: 'PLANNED', mapReference: null });
+    expect(resolveSafeEntry({ ...p, locationId: WZGORZA_ID, x: 11, y: 13 }, w)).toEqual(startPosition(w));
   });
 });
 
@@ -180,6 +206,16 @@ describe('walidacja błędnych danych', () => {
     const w4 = clone();
     w4.locations[0].connections[0].sourceLocationId = ZAGAJNIK_ID; // połączenie zdefiniowane w złej lokacji
     expect(codes(w4)).toContain('INVALID_CONNECTION');
+  });
+
+  it('zamknięte przejście: musi je otwierać odznaka; przeszkoda tylko na zamkniętym; lokacja za nim osiągalna tylko dzięki odznace', () => {
+    const w1 = clone();
+    const c1 = validateWorld(w1, MAPS, ENCOUNTER_TABLES, new Set()).map((i) => i.code);
+    expect(c1).toContain('INVALID_CONNECTION'); // nikt nie otwiera „zagajnik-do-wzgorz”
+    expect(c1).toContain('UNREACHABLE'); // Wzgórza nieosiągalne bez odblokowania
+    const w2 = clone();
+    w2.locations.find((l) => l.id === POLANA_ID)!.connections[0].lockVisual = 'fallen-tree';
+    expect(codes(w2)).toContain('INVALID_CONNECTION');
   });
 
   it('brak drogi powrotnej i lokacja nieosiągalna', () => {

@@ -22,8 +22,8 @@ function v1Save() {
 }
 
 describe('migracja zapisu v1 → v2 (→ bieżąca)', () => {
-  it('bieżąca wersja formatu to 3 (Sprint 4)', () => {
-    expect(SAVE_VERSION).toBe(3);
+  it('bieżąca wersja formatu to 4 (Sprint 6: postęp Prób Szlaku)', () => {
+    expect(SAVE_VERSION).toBe(4);
   });
 
   it('mapId „polana” → region, lokacja Polana Startowa i punkt „start”; pozycja i postęp zachowane', () => {
@@ -122,7 +122,7 @@ describe('migracja zapisu v2 → v3 (Sprint 4: natura, zdolność, przedmiot, ew
 
   it('ability → abilityId, heldItem → heldItemId (tylko znane przedmioty), natura neutralna, pusty stan ewolucji', () => {
     const out = migrateSave(v2());
-    expect(out.version).toBe(3);
+    expect(out.version).toBe(SAVE_VERSION); // v2 → v3 → v4
     const [a, b] = out.party;
     expect(a).toMatchObject({ abilityId: 'keen-eye', heldItemId: null, evolutionState: { cancelledAtLevel: null, evolvedFrom: null } });
     expect('ability' in a).toBe(false);
@@ -140,12 +140,70 @@ describe('migracja zapisu v2 → v3 (Sprint 4: natura, zdolność, przedmiot, ew
     expect(after.moves).toEqual(before.moves);
   });
 
-  it('zapis v1 przechodzi przez v2 do v3; zapis v3 jest stabilny (ponowna migracja nic nie zmienia)', () => {
+  it('zapis v1 przechodzi przez v2 i v3 do v4; wynik jest stabilny (ponowna migracja nic nie zmienia)', () => {
     const fromV1 = migrateSave({ ...v1Save(), party: [oldCreature('c-1')] });
-    expect(fromV1.version).toBe(3);
+    expect(fromV1.version).toBe(4);
+    expect(fromV1).toMatchObject({ earnedBadges: [], completedChallenges: [], unlockedConnections: [] });
     expect(fromV1.player.locationId).toBe(POLANA_ID);
     expect(fromV1.party[0].abilityId).toBe('keen-eye');
     const again = migrateSave(JSON.parse(JSON.stringify(fromV1)));
     expect(again).toEqual(fromV1);
+  });
+});
+
+describe('migracja zapisu v3 → v4 (Sprint 6: odznaki, ukończone Próby, odblokowane przejścia)', () => {
+  const v3 = (extra: Record<string, unknown> = {}) => ({
+    ...v1Save(),
+    version: 3,
+    player: { name: 'D', regionId: REGION_ID, locationId: ZAGAJNIK_ID, spawnPointId: 'z-polany', x: 10, y: 12, facing: 'down', money: 500, steps: 9, playTimeMs: 1, startedAt: 1 },
+    flags: { 'trainer:zagajnik-iga:defeated': true },
+    ...extra,
+  });
+
+  it('zwykły zapis v3: puste listy postępu Prób, reszta zapisu bez zmian', () => {
+    const out = migrateSave(v3());
+    expect(out.version).toBe(4);
+    expect(out).toMatchObject({ earnedBadges: [], completedChallenges: [], unlockedConnections: [] });
+    expect(out.flags).toEqual({ 'trainer:zagajnik-iga:defeated': true });
+    expect(out.player).toMatchObject({ locationId: ZAGAJNIK_ID, x: 10, y: 12, money: 500 });
+  });
+
+  it('dawna flaga badge:<id> (wymagania ze Sprintu 3) → zdobyta odznaka i jej odblokowania; nieznane odznaki pomijane', () => {
+    const out = migrateSave(v3({ flags: { 'badge:odznaka-wiatru': true, 'badge:nie-ma-takiej': true } }));
+    expect(out.earnedBadges).toEqual(['odznaka-wiatru']);
+    expect(out.unlockedConnections).toEqual(['zagajnik-do-wzgorz']);
+    expect(out.completedChallenges).toEqual([]); // odznaka nie oznacza ukończenia Próby
+  });
+
+  it('wydarzenie ukończenia Próby w flagach → ukończona Próba, odznaka i odblokowanie (naprawa spójności)', () => {
+    const out = migrateSave(v3({ flags: { 'challenge:proba-wiatru:completed': true } }));
+    expect(out.completedChallenges).toEqual(['proba-wiatru']);
+    expect(out.earnedBadges).toEqual(['odznaka-wiatru']);
+    expect(out.unlockedConnections).toEqual(['zagajnik-do-wzgorz']);
+  });
+
+  it('zapis v4: listy bez powtórzeń i tylko napisy; ukończona Próba ⇒ wydarzenie, odznaka ⇒ przejście; ponowna migracja stabilna', () => {
+    const raw = {
+      ...v3(),
+      version: 4,
+      earnedBadges: ['odznaka-wiatru', 'odznaka-wiatru', 7],
+      completedChallenges: ['proba-wiatru', null],
+      unlockedConnections: 'zły-typ',
+    };
+    const out = migrateSave(raw);
+    expect(out.earnedBadges).toEqual(['odznaka-wiatru']);
+    expect(out.completedChallenges).toEqual(['proba-wiatru']);
+    expect(out.unlockedConnections).toEqual(['zagajnik-do-wzgorz']);
+    expect(out.flags['challenge:proba-wiatru:completed']).toBe(true);
+    expect(migrateSave(JSON.parse(JSON.stringify(out)))).toEqual(out);
+  });
+
+  it('zapis v4 z postępem po wczytaniu do gry i ponownym zapisie (snapshot) zachowuje odznaki i odblokowania', () => {
+    const out = migrateSave({ ...v3(), version: 4, earnedBadges: ['odznaka-wiatru'], completedChallenges: ['proba-wiatru'], unlockedConnections: ['zagajnik-do-wzgorz'] });
+    useGame.getState().loadData(out);
+    const snap = useGame.getState().snapshot();
+    expect(snap).toMatchObject({ version: 4, earnedBadges: ['odznaka-wiatru'], completedChallenges: ['proba-wiatru'], unlockedConnections: ['zagajnik-do-wzgorz'] });
+    expect(migrateSave(snap)).toEqual(snap);
+    useGame.getState().resetGame();
   });
 });
