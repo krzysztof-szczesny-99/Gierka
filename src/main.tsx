@@ -11,6 +11,8 @@ import { installInputGuards, joystick, virtualInput } from './game/input';
 import { validateWorld } from './game/world';
 import { TRAINERS } from './config/trainers';
 import { validateTrainers } from './game/trainers';
+import { BADGES, CHALLENGES } from './config/challenges';
+import { validateChallenges } from './game/challenges';
 import { buildStarter } from './services/creatureService';
 import { configureEncounterDeps } from './services/encounterService';
 import { evolutionInfo, levelEvolutionFor } from './services/evolutionService';
@@ -41,6 +43,7 @@ expose('input', { joystick, virtualInput });
 expose('update', { checkForUpdate, forceUpdate });
 expose('world', { WORLD, validateWorld });
 expose('trainers', { TRAINERS, validateTrainers });
+expose('challenges', { CHALLENGES, BADGES, validateChallenges });
 // Scenariusze E2E (tylko ?debug): budowanie stworzenia z danych PokéAPI i stan ewolucji.
 expose('creatures', { buildStarter, evolutionInfo, levelEvolutionFor, getGrowth, NATURES, rng: gameRng });
 
@@ -50,6 +53,8 @@ if (DEBUG) {
   if (issues.length) console.error('Błędy w danych świata:', issues);
   const trainerIssues = validateTrainers();
   if (trainerIssues.length) console.error('Błędy w danych trenerów:', trainerIssues);
+  const challengeIssues = validateChallenges();
+  if (challengeIssues.length) console.error('Błędy w danych Prób Szlaku:', challengeIssues);
 }
 // Kontrolowane źródło losowości spotkań dla testów E2E (tylko ?debug).
 expose('encounter', { configure: configureEncounterDeps, createRng, createSequenceRng, rngFromNext, seed });

@@ -1,6 +1,7 @@
 // Oryginalna mapa „Szepczący Zagajnik” (26×18 kafelków) — druga lokacja Krainy Szlaków.
-// Legenda jak w testMap.ts. Wejście/wyjście: zachodnia ścieżka (do Polany Startowej).
-// Północna ścieżka prowadzi na Wzgórza Wiatru (lokacja PLANNED — przejście zablokowane z komunikatem).
+// Legenda jak w testMap.ts. Wejście/wyjście: zachodnia ścieżka (do Polany Startowej), wschodnia ścieżka
+// (do Wietrznej Strażnicy — Próba Wiatru) i północna ścieżka na Wzgórza Wiatru — zamknięta (zwalone drzewo),
+// dopóki gracz nie zdobędzie Odznaki Wiatru (Sprint 6).
 // Bezpieczna polanka przy wejściu; spotkania w paprociach (wysoka trawa) — tabela „zagajnik”.
 
 import { ENCOUNTER_CONFIG } from '../../config/encounters';
@@ -26,8 +27,8 @@ export const ZAGAJNIK_MAP: MapDef = {
     'TT....,,,,,,,.=.........TT',
     'TT...,,,,TT,,,=..,,,,,..TT',
     'TT..,,,,,TT,,,=.,,,,,,,.TT',
-    'TT...,,,,,,,,.=.,,,,,,,.TT',
-    'TT........R...=.........TT',
+    'TT...,,,,,,,,.=.,,,,,,,STT',
+    'TT........R...============',
     'TTTTTTTTTTTTTTTTTTTTTTTTTT',
   ],
   zones: [
@@ -46,6 +47,7 @@ export const ZAGAJNIK_MAP: MapDef = {
   signs: {
     '3,10': ['Szepczący Zagajnik.', 'W paprociach szeleszczą leśne stworzenia. Ścieżką na zachód wrócisz na Polanę Startową.'],
     '12,7': ['Na północ: Wzgórza Wiatru.', 'Uwaga: za zakrętem drogę zagradza zwalone drzewo.'],
+    '23,15': ['Na wschód: Wietrzna Strażnica.', 'Przewodniczka Wera prowadzi tam Próbę Wiatru dla tropicieli, którzy pokonali Zielarkę Igę.'],
   },
   doors: {},
 };

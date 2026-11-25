@@ -39,8 +39,8 @@ export interface TrainerEventTrigger {
  */
 export type RepeatPolicy = 'ONCE' | 'REMATCH';
 
-/** Wygląd (przebarwienie oryginalnej postaci z mapy). */
-export type TrainerLook = 'scout' | 'herbalist';
+/** Wygląd (przebarwienie oryginalnej postaci z mapy). „warden” — liderka Próby (Sprint 6). */
+export type TrainerLook = 'scout' | 'herbalist' | 'warden';
 
 export interface TrainerDef {
   id: string;
@@ -62,6 +62,11 @@ export interface TrainerDef {
   repeatPolicy: RepeatPolicy;
   eventTriggers?: TrainerEventTrigger[];
   look: TrainerLook;
+  /**
+   * Lider Próby (Sprint 6): identyfikator wyzwania z src/config/challenges.ts. Taki trener powstaje z danych
+   * wyzwania (LEADER_TRAINERS) — wymagania, odznaka i odblokowania obsługuje src/game/challenges.ts.
+   */
+  challengeId?: string;
 }
 
 export const TRAINERS: readonly TrainerDef[] = [

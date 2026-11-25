@@ -372,10 +372,38 @@ export function drawHero(ctx: Ctx, frame: string, ox = 0, oy = 0, palette: Parti
 }
 
 /** Trenerzy (Sprint 5): ta sama oryginalna postać co gracz, w innych barwach. */
-export const TRAINER_PALETTES: Record<'scout' | 'herbalist', Partial<Record<string, string>>> = {
+export const TRAINER_PALETTES: Record<'scout' | 'herbalist' | 'warden', Partial<Record<string, string>>> = {
   scout: { h: '#4f7a3a', H: '#3b5c2b', b: '#2f4a24', w: '#f2d14b', j: '#7a5230', J: '#5c3d24', g: '#4a5a2f' },
   herbalist: { h: '#8e5bb5', H: '#6a3f8c', b: '#4d2a66', r: '#2b1d14', w: '#5fb87a', j: '#c96a8b', J: '#9c4d68', g: '#6b8f3e' },
+  // Liderka Próby Wiatru: błękitna peleryna i srebrne włosy.
+  warden: { h: '#5aa9d6', H: '#3f84ad', b: '#2c5f80', r: '#c9cdd6', w: '#f4f4f4', j: '#3b6fa0', J: '#2a5279', g: '#41566e' },
 };
+
+// ───────── zwalone drzewo 16×16 (Sprint 6): przeszkoda na zamkniętym przejściu ─────────
+
+/** Leżący pień z gałązkami (oryginalny rysunek) — widoczny, dopóki przejście nie zostanie odblokowane. */
+export function drawFallenTree(ctx: Ctx, ox = 0, oy = 0): void {
+  const bark = '#6b4a2b';
+  const barkDark = '#4a321c';
+  const barkLight = '#8a6239';
+  const ring = '#c9a36a';
+  px(ctx, ox + 1, oy + 7, 14, 6, barkDark);
+  px(ctx, ox + 1, oy + 8, 14, 4, bark);
+  px(ctx, ox + 2, oy + 8, 11, 1, barkLight);
+  for (const x of [4, 8, 11]) px(ctx, ox + x, oy + 10, 1, 2, barkDark);
+  // słoje na ściętym końcu
+  px(ctx, ox + 13, oy + 7, 3, 6, barkDark);
+  px(ctx, ox + 14, oy + 8, 1, 4, ring);
+  // gałązki z liśćmi
+  px(ctx, ox + 3, oy + 4, 1, 3, barkDark);
+  px(ctx, ox + 9, oy + 5, 1, 2, barkDark);
+  px(ctx, ox + 1, oy + 2, 4, 3, '#3f7a35');
+  px(ctx, ox + 2, oy + 1, 2, 1, '#5a9a47');
+  px(ctx, ox + 8, oy + 3, 3, 2, '#3f7a35');
+  px(ctx, ox + 9, oy + 2, 1, 1, '#5a9a47');
+  // cień
+  px(ctx, ox + 2, oy + 13, 12, 1, 'rgba(0,0,0,0.25)');
+}
 
 // ───────── zastępcza sylwetka stworzenia 32×32 (oryginalna) ─────────
 

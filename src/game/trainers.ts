@@ -1,6 +1,7 @@
 // Trenerzy na mapie (Sprint 5): pole widzenia, podejście do gracza, wydarzenia, rozmowa i walidacja danych.
 // Czyste funkcje — scena mapy (OverworldScene) dostarcza informacji o przeszkodach.
 
+import { LEADER_TRAINERS } from '../config/challenges';
 import { isHeldItemId, ITEMS } from '../config/items';
 import { isNatureId } from '../config/natures';
 import { TRAINERS, type TrainerDef } from '../config/trainers';
@@ -17,12 +18,15 @@ export interface Point {
   y: number;
 }
 
+/** Wszystkie postacie-trenerzy na mapach: trenerzy (Sprint 5) i liderzy Prób (Sprint 6). */
+export const MAP_TRAINERS: readonly TrainerDef[] = [...TRAINERS, ...LEADER_TRAINERS];
+
 /** Trenerzy w lokacji. */
-export function trainersIn(locationId: string, list: readonly TrainerDef[] = TRAINERS): TrainerDef[] {
+export function trainersIn(locationId: string, list: readonly TrainerDef[] = MAP_TRAINERS): TrainerDef[] {
   return list.filter((t) => t.locationId === locationId);
 }
 
-export function getTrainer(id: string, list: readonly TrainerDef[] = TRAINERS): TrainerDef | undefined {
+export function getTrainer(id: string, list: readonly TrainerDef[] = MAP_TRAINERS): TrainerDef | undefined {
   return list.find((t) => t.id === id);
 }
 
@@ -136,7 +140,7 @@ export interface TrainerIssue {
 
 /** Spójność danych trenerów (testy jednostkowe + konsola w trybie ?debug). */
 export function validateTrainers(
-  list: readonly TrainerDef[] = TRAINERS,
+  list: readonly TrainerDef[] = MAP_TRAINERS,
   world: WorldDef = WORLD,
   maps: Readonly<Record<string, MapDef>> = MAPS,
 ): TrainerIssue[] {

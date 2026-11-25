@@ -3,10 +3,12 @@
 import * as Phaser from 'phaser';
 import { TYPE_COLOR } from '../config/text';
 import type { PokemonData } from '../engine/types';
-import { drawBlob, drawHero, drawTile, HERO_FRAMES, TRAINER_PALETTES } from './art';
+import { drawBlob, drawFallenTree, drawHero, drawTile, HERO_FRAMES, TRAINER_PALETTES } from './art';
 import { TILE_COUNT, TILE_SIZE } from './tiles';
 
 export const TILESET_KEY = 'tiles';
+/** Tekstura przeszkody na zamkniętym przejściu (Sprint 6). */
+export const FALLEN_TREE_KEY = 'lock-fallen-tree';
 
 function canvasTexture(scene: Phaser.Scene, key: string, w: number, h: number, draw: (ctx: CanvasRenderingContext2D) => void) {
   if (scene.textures.exists(key)) return;
@@ -31,6 +33,8 @@ export function createHeroTextures(scene: Phaser.Scene): void {
       canvasTexture(scene, `trainer-${look}-${frame}`, 16, 16, (ctx) => drawHero(ctx, frame, 0, 0, palette));
     }
   }
+  // Przeszkoda na zamkniętym przejściu (Sprint 6).
+  canvasTexture(scene, FALLEN_TREE_KEY, 16, 16, (ctx) => drawFallenTree(ctx));
 }
 
 export function blobKey(type: string): string {

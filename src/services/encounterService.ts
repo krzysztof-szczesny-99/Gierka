@@ -28,6 +28,8 @@ import { useGame } from '../state/gameStore';
 import { encounterClock, useUi, type EncounterEndReason, type EvolutionRequest, type LearnRequest } from '../state/uiStore';
 import { buildTrainerCreature, buildWild, dexInfo, errorMessage, loadMovesSafe, type CreatureBundle, type WildSpawn } from './creatureService';
 import { getTrainer, isDefeated } from '../game/trainers';
+import { challengeState, getChallenge } from '../game/challenges';
+import { WORLD } from '../config/world';
 import { pendingLevelEvolutions } from './evolutionService';
 import type { Creature } from '../engine/types';
 
@@ -201,6 +203,11 @@ async function startTrainerBattle(id: string, source: Extract<BusEvents['encount
   try {
     trainer = getTrainer(source.trainerId);
     if (!trainer) throw new Error(`Nieznany trener: ${source.trainerId}`);
+    // Lider Próby: walka tylko, gdy Próba jest dostępna (wymagania spełnione, jeszcze nieukończona).
+    if (trainer.challengeId) {
+      const ch = getChallenge(trainer.challengeId);
+      if (!ch || challengeState(ch, useGame.getState()) !== 'AVAILABLE') throw new Error('Ta Próba jest teraz niedostępna.');
+    }
     const game = useGame.getState();
     const party = game.party;
     if (!party.some((c) => c.hp > 0)) throw new Error('Twoja drużyna jest wyczerpana. Odwiedź Stację Opieki!');
@@ -261,6 +268,10 @@ function applyTrainerResult(st: BattleState, trainerId: string, rematch: boolean
   });
   if (outcome !== 'win') return; // przegrana: istniejący powrót do Stacji Opieki, trener nie jest oznaczony
   game.incStat('battlesWon');
+  if (trainer.challengeId) {
+    applyChallengeVictory(trainer.challengeId, trainer.name, notes);
+    return;
+  }
   const firstWin = !rematch && !isDefeated(trainer, game.flags);
   if (firstWin) {
     // Zapis wydarzenia i nagroda — dokładnie raz (flaga sprawdzana przed przyznaniem).
@@ -279,6 +290,31 @@ function applyTrainerResult(st: BattleState, trainerId: string, rematch: boolean
     notes.push(`Wygrywasz rewanż z: ${trainer.name}! (Nagroda była tylko za pierwsze zwycięstwo.)`);
   }
   for (const line of trainer.dialogueAfter) notes.push(`${trainer.name}: „${line}”`);
+}
+
+/**
+ * Zwycięstwo z liderem Próby (Sprint 6): ukończenie, wydarzenie, odznaka, odblokowania i nagroda — jedną zmianą
+ * stanu (gameStore.completeChallenge), więc dokładnie raz. Gdy Próba była już ukończona — tylko dialog.
+ */
+function applyChallengeVictory(challengeId: string, leaderName: string, notes: string[]): void {
+  const done = useGame.getState().completeChallenge(challengeId);
+  const ch = getChallenge(challengeId);
+  if (!ch) return;
+  if (!done) {
+    notes.push(`Wygrywasz z: ${leaderName}! (Próba była już ukończona — nagrody nie przyznaje się drugi raz.)`);
+    return;
+  }
+  notes.push(`Pokonujesz: ${leaderName}! ${ch.name} ukończona.`);
+  if (done.badge) notes.push(`Zdobywasz odznakę: ${done.badge.name}!`);
+  for (const connId of done.unlocked) {
+    const effect = done.badge?.unlockEffects.find((e) => e.connectionId === connId);
+    const conn = WORLD.locations.flatMap((l) => l.connections).find((c) => c.id === connId);
+    const dest = conn ? getLocation(conn.destinationLocationId)?.name : null;
+    notes.push(`Otwiera się przejście: ${effect?.description ?? dest ?? connId}.`);
+  }
+  if (done.money > 0) notes.push(`Otrzymujesz ${done.money} ${CURRENCY}.`);
+  for (const [item, n] of done.items) notes.push(`Otrzymujesz: ${ITEMS[item].name} ×${n}.`);
+  for (const line of ch.dialogue.victory) notes.push(`${leaderName}: „${line}”`);
 }
 
 /**

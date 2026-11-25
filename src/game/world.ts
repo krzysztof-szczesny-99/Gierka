@@ -2,6 +2,7 @@
 // wymagania, decyzja o przejściu, bezpieczny punkt wejścia (ochrona przed softlockiem) i walidacja danych.
 
 import { ENCOUNTER_TABLES, TERRAIN_METHOD, type EncounterTable } from '../config/encounters';
+import { BADGES } from '../config/challenges';
 import { ITEMS } from '../config/items';
 import {
   DEFAULT_SPAWN_POINT_ID,
@@ -20,6 +21,9 @@ import { MAPS } from './maps';
 import type { MapDef } from './maps/testMap';
 import { isWalkable } from './movement';
 
+/** Przejścia otwierane przez odznaki (efekty UNLOCK_CONNECTION). */
+const UNLOCKABLE_CONNECTIONS: ReadonlySet<string> = new Set(BADGES.flatMap((b) => b.unlockEffects.map((e) => e.connectionId)));
+
 /** Położenie gracza w świecie (zapisywane w grze). */
 export interface WorldPosition {
   regionId: string;
@@ -34,6 +38,10 @@ export interface WorldPosition {
 export interface ProgressState {
   flags: Readonly<Record<string, boolean>>;
   bag: Readonly<Partial<Record<string, number>>>;
+  /** Zdobyte odznaki (zapis v4, Sprint 6). */
+  earnedBadges?: readonly string[];
+  /** Odblokowane przejścia (LocationConnection.locked) — zapis v4, Sprint 6. */
+  unlockedConnections?: readonly string[];
 }
 
 export function getRegion(id: string, world: WorldDef = WORLD): RegionDef | null {
@@ -89,15 +97,20 @@ export function connectionAt(location: LocationDef, x: number, y: number): Locat
 
 export function requirementsMet(req: Requirements | undefined, state: ProgressState): boolean {
   if (!req) return true;
-  if (req.badges?.some((b) => !state.flags[`badge:${b}`])) return false;
+  if (req.badges?.some((b) => !(state.earnedBadges ?? []).includes(b))) return false;
   if (req.items?.some((i) => !((state.bag[i] ?? 0) > 0))) return false;
   if (req.events?.some((e) => !state.flags[e])) return false;
   return true;
 }
 
+/** Czy zamknięte przejście zostało już otwarte (efektem odznaki). Przejście bez `locked` jest zawsze otwarte. */
+export function isConnectionOpen(conn: LocationConnection, state: Pick<ProgressState, 'unlockedConnections'>): boolean {
+  return !conn.locked || (state.unlockedConnections ?? []).includes(conn.id);
+}
+
 export type TravelCheck =
   | { ok: true; position: WorldPosition; destination: LocationDef }
-  | { ok: false; reason: 'missing-destination' | 'not-implemented' | 'requirements' | 'missing-spawn' | 'region-locked'; message: string[] };
+  | { ok: false; reason: 'missing-destination' | 'not-implemented' | 'locked' | 'requirements' | 'missing-spawn' | 'region-locked'; message: string[] };
 
 /** Czy połączenie można użyć: istnieje grywalna lokacja docelowa z punktem pojawienia się, a wymagania są spełnione. */
 export function checkTravel(conn: LocationConnection, state: ProgressState, world: WorldDef = WORLD): TravelCheck {
@@ -111,6 +124,7 @@ export function checkTravel(conn: LocationConnection, state: ProgressState, worl
       return { ok: false, reason: 'region-locked', message: conn.blockedMessage };
     }
   }
+  if (!isConnectionOpen(conn, state)) return { ok: false, reason: 'locked', message: conn.blockedMessage };
   const destReq: Requirements = { badges: dest.requiredBadges, items: dest.requiredItems, events: dest.requiredEvents };
   if (!requirementsMet(conn.requirements, state) || !requirementsMet(destReq, state)) {
     return { ok: false, reason: 'requirements', message: conn.blockedMessage };
@@ -197,6 +211,8 @@ export function validateWorld(
   world: WorldDef = WORLD,
   maps: Readonly<Record<string, MapDef>> = MAPS,
   tables: Readonly<Record<string, EncounterTable>> = ENCOUNTER_TABLES,
+  /** Zamknięte przejścia, które da się otworzyć w grze (efekty odznak) — liczą się do osiągalności lokacji. */
+  unlockable: ReadonlySet<string> = UNLOCKABLE_CONNECTIONS,
 ): WorldIssue[] {
   const issues: WorldIssue[] = [];
   const add = (code: WorldIssueCode, ref: string, message: string) => issues.push({ code, ref, message });
@@ -288,6 +304,8 @@ export function validateWorld(
         for (let x = t.x; x < t.x + (t.w ?? 1); x++)
           if (!isWalkable(grid, x, y)) add('INVALID_CONNECTION', ref, `Wyzwalacz (${x},${y}) jest poza mapą lub na przeszkodzie.`);
       if (!c.blockedMessage.length) add('INVALID_CONNECTION', ref, 'Brak komunikatu o zablokowanym przejściu.');
+      if (c.lockVisual && !c.locked) add('INVALID_CONNECTION', ref, 'Przeszkoda (lockVisual) tylko na zamkniętym przejściu.');
+      if (c.locked && !unlockable.has(c.id)) add('INVALID_CONNECTION', ref, 'Zamkniętego przejścia nie otwiera żadna odznaka — nie da się go odblokować.');
       const dest = getLocation(c.destinationLocationId, world);
       if (!dest) {
         add('MISSING_LOCATION', ref, `Połączenie prowadzi do nieistniejącej lokacji „${c.destinationLocationId}”.`);
@@ -307,7 +325,7 @@ export function validateWorld(
     }
   }
 
-  // Każda grywalna lokacja osiągalna z lokacji startowej (połączenia bez wymagań).
+  // Każda grywalna lokacja osiągalna z lokacji startowej (połączenia bez wymagań; zamknięte — jeśli da się je otworzyć).
   const start = getLocation(getRegion(world.startRegionId, world)?.startLocationId, world);
   if (start) {
     const reached = new Set<string>([start.id]);
@@ -317,6 +335,7 @@ export function validateWorld(
       for (const c of cur?.connections ?? []) {
         const d = getLocation(c.destinationLocationId, world);
         if (!d || d.status !== 'IMPLEMENTED' || reached.has(d.id) || !requirementsMet(c.requirements, { flags: {}, bag: {} })) continue;
+        if (c.locked && !unlockable.has(c.id)) continue;
         reached.add(d.id);
         queue.push(d.id);
       }

@@ -91,9 +91,9 @@ zapis, zbuforowane dane i sprite'y; w trawie spotkasz offline tylko gatunki, kt�
 - Model świata (Sprint 3): region „Kraina Szlaków” i lokacje opisane danymi w `src/config/world.ts` (typ, status, mapa,
   połączenia, punkty pojawienia się, tabele spotkań, wymagania, punkt leczenia). Druga oryginalna mapa 26×18 —
   **Szepczący Zagajnik** (wejście ścieżką na wschodnim skraju Polany, przy drogowskazie). Ma własną tabelę spotkań
-  w paprociach (m.in. caterpie, weedle, oddish, hoothoot, seedot, skwovet, rzadko fomantis). Północna ścieżka na
-  Wzgórza Wiatru jest zablokowana komunikatem (lokacja w planach). Przejście: wygaszenie ekranu, zapis położenia,
-  2 kroki ochronne po wejściu. Przegrana w Zagajniku przenosi do Stacji Opieki na Polanie.
+  w paprociach (m.in. caterpie, weedle, oddish, hoothoot, seedot, skwovet, rzadko fomantis). Północną ścieżkę na
+  Wzgórza Wiatru zagradza zwalone drzewo, dopóki gracz nie zdobędzie Odznaki Wiatru (Sprint 6). Przejście: wygaszenie
+  ekranu, zapis położenia, 2 kroki ochronne po wejściu. Przegrana w Zagajniku przenosi do Stacji Opieki na Polanie.
 - Rozwój stworzeń (Sprint 4):
   - **Natury** — 25 natur (5 neutralnych): +10% jednej statystyki i −10% innej. Widać je w Drużynie (▲/▼ przy statystykach).
   - **Zdolności** — działa 20 prostych zdolności (`src/config/abilities.ts`): wzmocnienie typu przy niskim PŻ, „Groźne
@@ -111,8 +111,16 @@ zapis, zbuforowane dane i sprite'y; w trawie spotkasz offline tylko gatunki, kt�
   zawsze przez centralną blokadę spotkań. Gracz zamiera, trener podchodzi bezpieczną ścieżką, dialog, a potem dokładnie
   jedna walka w tym samym silniku. Profile AI: BASIC, BALANCED (zmienia stworzenia), AGGRESSIVE; żaden nie wybiera ruchu bez PP.
   Wygrana: flaga w zapisie, nagroda tylko raz, nowy dialog. Przegrana: powrót do Stacji Opieki, trener niepokonany.
-- Zapis w formacie v3 (Sprint 4: natura, zdolność, przedmiot i stan ewolucji stworzeń; wcześniej v2 — położenie w świecie). Starsze zapisy (v1) są migrowane automatycznie —
-  postęp i pozycja na Polanie zostają. Błędna lokacja lub pozycja w zapisie → bezpieczny punkt pojawienia się.
+- Próba Szlaku (Sprint 6, `src/config/challenges.ts`): ogólny system wyzwań (wyzwanie, lider, odznaka, efekty odznaki)
+  i pierwsza Próba — **Próba Wiatru** w nowej lokacji **Wietrzna Strażnica** (kamienna arena; wejście wschodnią ścieżką
+  z Szepczącego Zagajnika, przy drogowskazie). Prowadzi ją **Przewodniczka Wera** (stworzenia latające, profil AI
+  AGGRESSIVE). Wymaganie: pokonana Zielarka Iga — bez tego wejście w bramę areny albo rozmowa kończy się odmową.
+  Wygrana (dokładnie raz): **Odznaka Wiatru**, zapisane ukończenie, nagroda 800 ◆ i 2 Mocne napary oraz otwarcie
+  przejścia z Zagajnika na nową mapę **Wzgórza Wiatru** (22×16, własna tabela spotkań). Przegrana: powrót do Stacji
+  Opieki bez nagrody. Odznaki widać w Dzienniku.
+- Zapis w formacie v4 (Sprint 6: `earnedBadges`, `completedChallenges`, `unlockedConnections`; v3 — natura, zdolność,
+  przedmiot i stan ewolucji stworzeń; v2 — położenie w świecie). Starsze zapisy (v1–v3) są migrowane automatycznie —
+  postęp i pozycja zostają. Błędna lokacja lub pozycja w zapisie → bezpieczny punkt pojawienia się.
 - Ruch po siatce: joystick ekranowy, opcjonalnie klawiatura; bieg; kamera z dopasowaniem przybliżenia.
 - Spotkania przez jedną centralną blokadę (tylko jedno naraz, wynik walki liczony dokładnie raz, krótkie odnowienie po walce).
 - Losowe spotkania po kroku (Sprint 2): wysoka trawa (Łąka, brzeg Stawu, Cichy Gaj) — 10% na krok, skalisty grunt
@@ -137,7 +145,7 @@ zapis, zbuforowane dane i sprite'y; w trawie spotkasz offline tylko gatunki, kt�
 
 ## Zaplanowane (kolejne etapy)
 
-- Etap 2: kolejni trenerzy i lokacje, kolejne zdolności i przedmioty, trudniejsze warunki ewolucji, kolejne lokacje (Wzgórza Wiatru), import map z Tiled.
+- Etap 2: kolejni trenerzy, kolejne Próby Szlaku i lokacje (dalszy szlak za Wzgórzami Wiatru), kolejne zdolności i przedmioty, trudniejsze warunki ewolucji, import map z Tiled.
 - Etap 3: walki podwójne, ruchy wieloturowe, pogoda, współdzielony EXP, lepszy magazyn.
 - Etap 4: otwarte strefy (rzut kapsułą z mapy, unik, zachowania stworzeń), pora dnia, zadania badawcze.
 - Etap 5: pierwsza przygoda (8 prób), drugi region, megaewolucje, interakcje z towarzyszem.
@@ -149,7 +157,8 @@ zapis, zbuforowane dane i sprite'y; w trawie spotkasz offline tylko gatunki, kt�
 - Działa 20 zdolności i 10 przedmiotów trzymanych — pozostałe zdolności z PokéAPI są tylko zapisywane.
 - Ewolucje: tylko poziom i kamień (opcjonalnie z płcią); formy regionalne jeszcze nie ewoluują.
 - Ruchy wieloturowe (np. ładowanie, odpoczynek po ataku) działają jak zwykły atak; pogoda i pola bitwy — brak.
-- Trenerzy nie mają jeszcze własnych grafik (przebarwiona postać gracza) ani wyboru „tak/nie” przed rewanżem.
+- Trenerzy i liderka Próby nie mają jeszcze własnych grafik (przebarwiona postać gracza) ani wyboru „tak/nie” przed rewanżem.
+- Jest jedna Próba i jedna odznaka; Wzgórza Wiatru kończą się na północy (dalszy szlak nie jest jeszcze zbudowany).
 - Nazwy stworzeń i ruchów są angielskie (PokéAPI nie ma języka polskiego).
 - Przerwana walka (zamknięcie aplikacji) nie jest wznawiana — wracasz na mapę sprzed walki.
 

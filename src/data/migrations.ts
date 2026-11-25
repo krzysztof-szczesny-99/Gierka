@@ -4,10 +4,14 @@
 // v2 → v3 (Sprint 4): stworzenia dostają `nature`, `abilityId` (dawniej `ability`), `heldItemId` (dawniej
 // `heldItem`) i `evolutionState`. Natura starych stworzeń jest neutralna (stała, wyliczona z uid), więc ich
 // zapisane statystyki się nie zmieniają.
+// v3 → v4 (Sprint 6): postęp Prób Szlaku — earnedBadges, completedChallenges, unlockedConnections. Dawne flagi
+// `badge:<id>` (wymagania z Sprintu 3) stają się zdobytymi odznakami; wydarzenia ukończenia Prób — ukończonymi
+// Próbami; odblokowania wynikają z odznak. Flagi zostają nietknięte.
 
 import { HELD_ITEM_IDS } from '../config/items';
 import { isNatureId, neutralNatureFor } from '../config/natures';
 import { DEFAULT_SPAWN_POINT_ID } from '../config/world';
+import { getBadge, normalizeProgression } from '../game/challenges';
 import { getLocation, locationForMap, startLocation } from '../game/world';
 import { SAVE_VERSION, type GameData, type PlayerState } from '../state/gameStore';
 
@@ -55,9 +59,20 @@ function v2ToV3(data: AnyRecord): AnyRecord {
   return { ...data, party: list(data.party), storage: list(data.storage), version: 3 };
 }
 
+/** v3 → v4: listy postępu Prób (puste dla zwykłego zapisu v3). */
+function v3ToV4(data: AnyRecord): AnyRecord {
+  const flags = isRecord(data.flags) ? data.flags : {};
+  const legacyBadges = Object.keys(flags)
+    .filter((k) => k.startsWith('badge:') && flags[k] === true)
+    .map((k) => k.slice('badge:'.length))
+    .filter((id) => !!getBadge(id));
+  return { ...data, earnedBadges: legacyBadges, completedChallenges: [], unlockedConnections: [], version: 4 };
+}
+
 const STEPS: Record<number, (d: AnyRecord) => AnyRecord> = {
   1: v1ToV2,
   2: v2ToV3,
+  3: v3ToV4,
 };
 
 /** Doprowadza dowolny obsługiwany zapis do bieżącej wersji (SAVE_VERSION). */
@@ -75,6 +90,8 @@ export function migrateSave(raw: unknown): GameData {
   // Stworzenia zawsze z kompletem pól v3 (idempotentne — np. dla ręcznie edytowanego zapisu).
   data.party = Array.isArray(data.party) ? data.party.map(upgradeCreatureV3) : [];
   data.storage = Array.isArray(data.storage) ? data.storage.map(upgradeCreatureV3) : [];
+  // Postęp Prób zawsze spójny (idempotentne): ukończona Próba ⇒ odznaka ⇒ odblokowane przejścia.
+  Object.assign(data, normalizeProgression(data));
   // Zapis z niepełnym położeniem (np. ręcznie edytowany) — uzupełnienie lokacją startową.
   const player = (isRecord(data.player) ? data.player : {}) as Partial<PlayerState>;
   if (!getLocation(player.locationId)) {

@@ -1,9 +1,11 @@
 // Trwały stan gry (zapisywany w IndexedDB): gracz, drużyna, magazyn, torba, Atlas, zadania, ustawienia.
 
 import { create } from 'zustand';
+import type { BadgeDef, ChallengeDef } from '../config/challenges';
 import { isHeldItemId, ITEMS, STARTING_BAG, STARTING_MONEY, type ItemId } from '../config/items';
 import { QUESTS } from '../config/quests';
 import { RULES } from '../config/rules';
+import { challengeRewardItems, challengeVictory, getChallenge } from '../game/challenges';
 import { getLocation, startPosition, type WorldPosition } from '../game/world';
 import { displayName, healCreature, toMoveSlot } from '../engine/creature';
 import type { Creature, Dir, MoveData, TypeName } from '../engine/types';
@@ -11,9 +13,10 @@ import type { Creature, Dir, MoveData, TypeName } from '../engine/types';
 /**
  * Wersja formatu zapisu. 2 (Sprint 3): położenie w modelu świata (regionId, locationId, spawnPointId)
  * zamiast `mapId`. 3 (Sprint 4): stworzenia z naturą, abilityId, heldItemId i evolutionState.
+ * 4 (Sprint 6): postęp Prób Szlaku — earnedBadges, completedChallenges, unlockedConnections.
  * Migracje starszych zapisów — src/data/migrations.ts.
  */
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
 export interface PlayerState {
   name: string;
@@ -65,7 +68,24 @@ export interface GameData {
   stats: GameStats;
   questsClaimed: Record<string, boolean>;
   flags: Record<string, boolean>;
+  /** Zdobyte odznaki (identyfikatory z src/config/challenges.ts), w kolejności zdobycia. */
+  earnedBadges: string[];
+  /** Ukończone Próby Szlaku. */
+  completedChallenges: string[];
+  /** Otwarte zamknięte przejścia (LocationConnection.locked) — efekty odznak. */
+  unlockedConnections: string[];
   settings: Settings;
+}
+
+/** Wynik pierwszego zwycięstwa w Próbie (do komunikatów po walce). */
+export interface ChallengeCompletion {
+  challenge: ChallengeDef;
+  /** Odznaka przyznana teraz (null — gracz już ją miał). */
+  badge: BadgeDef | null;
+  /** Przejścia otwarte teraz. */
+  unlocked: string[];
+  money: number;
+  items: [ItemId, number][];
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -94,6 +114,9 @@ function freshData(): GameData {
     stats: { battlesWon: 0, caught: 0, fled: 0, blackouts: 0, encounters: 0 },
     questsClaimed: {},
     flags: {},
+    earnedBadges: [],
+    completedChallenges: [],
+    unlockedConnections: [],
     settings: { ...DEFAULT_SETTINGS },
   };
 }
@@ -138,6 +161,12 @@ export interface GameStore extends GameData {
   unequipItem(uid: string): boolean;
   /** Anulowana ewolucja przez poziom (nie proponujemy jej ponownie przed kolejnym awansem). */
   setEvolutionCancelled(uid: string, level: number): void;
+  /**
+   * Pierwsze zwycięstwo w Próbie — jedna, niepodzielna zmiana stanu: ukończenie Próby, wydarzenie ukończenia,
+   * odznaka, odblokowane przejścia i nagroda dodatkowa. Zwraca null, jeśli Próba była już ukończona
+   * (wtedy nic się nie zmienia — odznaka i nagroda nie mogą zostać przyznane drugi raz).
+   */
+  completeChallenge(challengeId: string): ChallengeCompletion | null;
 }
 
 const DATA_KEYS: (keyof GameData)[] = [
@@ -150,6 +179,9 @@ const DATA_KEYS: (keyof GameData)[] = [
   'stats',
   'questsClaimed',
   'flags',
+  'earnedBadges',
+  'completedChallenges',
+  'unlockedConnections',
   'settings',
 ];
 
@@ -380,6 +412,27 @@ export const useGame = create<GameStore>()((set, get) => ({
     if (!c) return;
     const map = new Map([[uid, { ...c, evolutionState: { ...c.evolutionState, cancelledAtLevel: level } }]]);
     set((s) => ({ party: replaceByUid(s.party, map), storage: replaceByUid(s.storage, map) }));
+  },
+
+  completeChallenge: (challengeId) => {
+    const s = get();
+    const challenge = getChallenge(challengeId);
+    if (!challenge) return null;
+    const v = challengeVictory(challenge, s);
+    if (!v) return null;
+    const money = Math.max(0, Math.floor(challenge.optionalRewards.money));
+    const items = challengeRewardItems(challenge);
+    const bag = { ...s.bag };
+    for (const [id, n] of items) bag[id] = (bag[id] ?? 0) + n;
+    set({
+      completedChallenges: v.completedChallenges,
+      earnedBadges: v.earnedBadges,
+      unlockedConnections: v.unlockedConnections,
+      flags: v.flags,
+      bag,
+      player: { ...s.player, money: s.player.money + money },
+    });
+    return { challenge, badge: v.badge, unlocked: v.unlocked, money, items };
   },
 }));
 

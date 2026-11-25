@@ -126,6 +126,17 @@ export const ENCOUNTER_TABLES: Record<string, EncounterTable> = {
       { pokemonId: 'fomantis', weight: 3, minLevel: 5, maxLevel: 7, encounterMethod: 'grass', rarity: 'rare' },
     ],
   },
+  // Wzgórza Wiatru (Sprint 6, za zamkniętym przejściem): stworzenia wietrznych zboczy, wyższe poziomy.
+  wzgorza: {
+    id: 'wzgorza',
+    entries: [
+      { pokemonId: 'spearow', weight: 14, minLevel: 9, maxLevel: 12, encounterMethod: 'grass', rarity: 'common' },
+      { pokemonId: 'hoppip', weight: 12, minLevel: 9, maxLevel: 12, encounterMethod: 'grass', rarity: 'common' },
+      { pokemonId: 'mareep', weight: 8, minLevel: 10, maxLevel: 12, encounterMethod: 'grass', rarity: 'uncommon' },
+      { pokemonId: 'swablu', weight: 6, minLevel: 10, maxLevel: 13, encounterMethod: 'grass', rarity: 'uncommon' },
+      { pokemonId: 'rookidee', weight: 3, minLevel: 11, maxLevel: 13, encounterMethod: 'grass', rarity: 'rare' },
+    ],
+  },
   // Jedyne widoczne stworzenie na mapie: nieruchomy „Strażnik Cichego Gaju” (spotkanie specjalne).
   'grove-guardian': {
     id: 'grove-guardian',
