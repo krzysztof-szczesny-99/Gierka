@@ -10,11 +10,13 @@ import { CURRENCY } from '../config/text';
 import { RULES } from '../config/rules';
 import { getMove, getPokemon, getTypeChart, getGrowthTables, isPokemonCached } from '../data/repository';
 import { saveNow } from '../data/saveGame';
-import { createWildBattle } from '../engine/battle/battleEngine';
+import { ITEMS, type ItemId } from '../config/items';
+import type { TrainerDef } from '../config/trainers';
+import { createTrainerBattle, createWildBattle } from '../engine/battle/battleEngine';
 import type { BattleEvent, BattleState } from '../engine/battle/types';
 import { displayName } from '../engine/creature';
 import { gameRng, type Rng } from '../engine/rng';
-import type { GrowthTable, MoveData, PokemonData, TypeChart } from '../engine/types';
+import type { GrowthTable, MoveData, PokemonData, SpeciesData, TypeChart } from '../engine/types';
 import { eligibleEntries, encounterTable, methodForTerrain, pickEncounterEntry } from '../game/encounterZones';
 import { bus, type BusEvents, type EncounterOutcome, type StepEncounterSource } from '../game/eventBus';
 import { releaseInput } from '../game/input';
@@ -24,7 +26,8 @@ import { getLocation, healingTarget, startLocation, type WorldPosition } from '.
 import { useBattle } from '../state/battleStore';
 import { useGame } from '../state/gameStore';
 import { encounterClock, useUi, type EncounterEndReason, type EvolutionRequest, type LearnRequest } from '../state/uiStore';
-import { buildWild, dexInfo, errorMessage, loadMovesSafe, type WildSpawn } from './creatureService';
+import { buildTrainerCreature, buildWild, dexInfo, errorMessage, loadMovesSafe, type CreatureBundle, type WildSpawn } from './creatureService';
+import { getTrainer, isDefeated } from '../game/trainers';
 import { pendingLevelEvolutions } from './evolutionService';
 import type { Creature } from '../engine/types';
 
@@ -47,6 +50,15 @@ export interface EncounterDeps {
   minTransitionMs: number;
   /** Propozycje ewolucji dla stworzeń, które awansowały w walce (dane łańcucha z bufora). */
   collectEvolutions(party: Creature[], leveledUids: string[]): Promise<EvolutionRequest[]>;
+  /** Drużyna trenera (dane PokéAPI z bufora; testy podstawiają gotowe stworzenia). */
+  buildTrainerTeam(trainer: TrainerDef, rng: Rng): Promise<{ creature: Creature; bundle: CreatureBundle }[]>;
+}
+
+async function buildTrainerTeamFromData(trainer: TrainerDef, rng: Rng): Promise<{ creature: Creature; bundle: CreatureBundle }[]> {
+  const out: { creature: Creature; bundle: CreatureBundle }[] = [];
+  // Kolejno (nie równolegle) — stała kolejność losowań z ziarnem gry.
+  for (const m of trainer.team) out.push(await buildTrainerCreature(m, trainer.name, rng));
+  return out;
 }
 
 const DEFAULT_DEPS: EncounterDeps = {
@@ -62,6 +74,7 @@ const DEFAULT_DEPS: EncounterDeps = {
   now: encounterClock,
   minTransitionMs: 750,
   collectEvolutions: pendingLevelEvolutions,
+  buildTrainerTeam: buildTrainerTeamFromData,
 };
 
 let deps: EncounterDeps = DEFAULT_DEPS;
@@ -120,6 +133,7 @@ export async function startWildEncounter(payload: BusEvents['encounter']): Promi
   const t0 = deps.now();
 
   const source = payload.source;
+  if (source.kind === 'trainer') return startTrainerBattle(id, source, t0);
   let built: { state: BattleState; events: BattleEvent[] };
   let spawn: WildSpawn;
   try {
@@ -177,6 +191,97 @@ export async function startWildEncounter(payload: BusEvents['encounter']): Promi
 }
 
 /**
+ * Walka z trenerem (Sprint 5) — ta sama blokada spotkania i ten sam silnik walki (createTrainerBattle).
+ * Wywoływana po dialogu przed walką, gdy spotkanie nadal jest w stanie ENCOUNTER_STARTING.
+ */
+async function startTrainerBattle(id: string, source: Extract<BusEvents['encounter']['source'], { kind: 'trainer' }>, t0: number): Promise<boolean> {
+  let built: { state: BattleState; events: BattleEvent[] };
+  const trainerSpecies: Record<string, SpeciesData> = {};
+  let trainer: TrainerDef | undefined;
+  try {
+    trainer = getTrainer(source.trainerId);
+    if (!trainer) throw new Error(`Nieznany trener: ${source.trainerId}`);
+    const game = useGame.getState();
+    const party = game.party;
+    if (!party.some((c) => c.hp > 0)) throw new Error('Twoja drużyna jest wyczerpana. Odwiedź Stację Opieki!');
+    const team = await deps.buildTrainerTeam(trainer, deps.rng);
+    const [typeChart, partyData] = await Promise.all([deps.getTypeChart(), Promise.all(party.map((c) => deps.getPokemon(c.pokemon)))]);
+    const pokemon: Record<string, PokemonData> = {};
+    for (const p of partyData) pokemon[p.name] = p;
+    for (const m of team) {
+      pokemon[m.bundle.pokemon.name] = m.bundle.pokemon;
+      trainerSpecies[m.creature.uid] = m.bundle.species;
+    }
+    const enemies = team.map((m) => m.creature);
+    const moves = await deps.loadMoves([...party, ...enemies].flatMap((c) => c.moves.map((m) => m.name)));
+    const growth = await deps.getGrowthTables(party.map((c) => c.growthRate));
+    built = createTrainerBattle({ playerName: game.player.name, party, enemies, pokemon, moves, growth, typeChart, trainerName: trainer.name, ai: trainer.aiProfile });
+    const elapsed = deps.now() - t0;
+    if (elapsed < deps.minTransitionMs) await sleep(deps.minTransitionMs - elapsed);
+  } catch (e) {
+    useUi.getState().setTransition(false);
+    useUi.getState().showToast(errorMessage(e));
+    cancelEncounter(id, 'init-error');
+    return false;
+  }
+  if (!isStarting(id)) {
+    useUi.getState().setTransition(false);
+    return false;
+  }
+  const first = built.state.sides[1].party[built.state.sides[1].active[0]];
+  const firstData = first ? built.state.pokemon[first.pokemon] : undefined;
+  if (first && firstData && trainerSpecies[first.uid]) useGame.getState().markSeen(dexInfo(firstData, trainerSpecies[first.uid]));
+  useBattle.getState().begin(built.state, built.events, {
+    encounterId: id,
+    actorId: source.actorId,
+    staticId: null,
+    zoneId: null,
+    enemySpecies: null,
+    trainerId: trainer.id,
+    rematch: source.rematch,
+    trainerSpecies,
+  });
+  const ui = useUi.getState();
+  ui.confirmBattle(id);
+  ui.setMode('battle');
+  ui.setTransition(false);
+  return true;
+}
+
+/** Wynik walki z trenerem: flaga pokonania i nagroda tylko przy pierwszej wygranej; dialog po walce. */
+function applyTrainerResult(st: BattleState, trainerId: string, rematch: boolean, outcome: EncounterOutcome, species: Record<string, SpeciesData>, notes: string[]): void {
+  const game = useGame.getState();
+  const trainer = getTrainer(trainerId);
+  if (!trainer) return;
+  // Atlas: stworzenia trenera, które pojawiły się w walce (aktywne albo pokonane).
+  const enemySide = st.sides[1];
+  enemySide.party.forEach((c, i) => {
+    const data = st.pokemon[c.pokemon];
+    if (data && species[c.uid] && (c.hp <= 0 || i === enemySide.active[0])) game.markSeen(dexInfo(data, species[c.uid]));
+  });
+  if (outcome !== 'win') return; // przegrana: istniejący powrót do Stacji Opieki, trener nie jest oznaczony
+  game.incStat('battlesWon');
+  const firstWin = !rematch && !isDefeated(trainer, game.flags);
+  if (firstWin) {
+    // Zapis wydarzenia i nagroda — dokładnie raz (flaga sprawdzana przed przyznaniem).
+    game.setFlag(trainer.defeatedEventId);
+    notes.push(`Pokonujesz: ${trainer.name}!`);
+    if (trainer.reward.money > 0) {
+      game.addMoney(trainer.reward.money);
+      notes.push(`Otrzymujesz ${trainer.reward.money} ${CURRENCY}.`);
+    }
+    for (const [item, n] of Object.entries(trainer.reward.items ?? {}) as [ItemId, number][]) {
+      if (!(item in ITEMS) || !(n > 0)) continue;
+      game.addItem(item, n);
+      notes.push(`Otrzymujesz: ${ITEMS[item].name} ×${n}.`);
+    }
+  } else {
+    notes.push(`Wygrywasz rewanż z: ${trainer.name}! (Nagroda była tylko za pierwsze zwycięstwo.)`);
+  }
+  for (const line of trainer.dialogueAfter) notes.push(`${trainer.name}: „${line}”`);
+}
+
+/**
  * Zakończenie walki z wynikiem (zwycięstwo, złapanie, ucieczka, przegrana).
  * Wynik jest przetwarzany dokładnie raz — kolejne wywołania (np. podwójne „Dalej”) zwracają false.
  */
@@ -213,6 +318,8 @@ export async function finishBattle(): Promise<boolean> {
           ? `${displayName(caught)} dołącza do Twojej drużyny!`
           : `Drużyna jest pełna — ${displayName(caught)} trafia do magazynu.`,
       );
+    } else if (outcome === 'win' && meta.trainerId) {
+      applyTrainerResult(st, meta.trainerId, !!meta.rematch, outcome, meta.trainerSpecies ?? {}, notes);
     } else if (outcome === 'win') {
       game.incStat('battlesWon');
       const enemy = st.sides[1].party[0];
@@ -223,6 +330,7 @@ export async function finishBattle(): Promise<boolean> {
     } else if (outcome === 'fled') {
       game.incStat('fled');
     }
+    if (outcome !== 'win' && meta.trainerId) applyTrainerResult(st, meta.trainerId, !!meta.rematch, outcome, meta.trainerSpecies ?? {}, notes);
     if ((outcome === 'win' || outcome === 'caught') && meta.zoneId === 'grove') game.setFlag('grove-done');
     // Spotkanie specjalne po wygranej lub złapaniu nie pojawia się ponownie (flaga w istniejącym polu zapisu).
     if ((outcome === 'win' || outcome === 'caught') && meta.staticId) game.setFlag(staticDoneFlag(meta.staticId));

@@ -1,6 +1,7 @@
 // Testy regresji E2E (Sprint 1: joystick i blokada spotkań; Sprint 2: tereny i losowe spotkania;
 // Sprint 3: model świata, dwie lokacje, przejścia, zapis lokacji i migracja zapisu;
-// Sprint 4: natury, zdolności, przedmioty trzymane, ewolucje, zapis v3)
+// Sprint 4: natury, zdolności, przedmioty trzymane, ewolucje, zapis v3;
+// Sprint 5: trenerzy — rozmowa, pole widzenia, wydarzenie, dialog, walka, nagroda, zapis)
 // na prawdziwym buildzie (Phaser + PokéAPI). Ruch wyłącznie przez joystick ekranowy (zdarzenia wskaźnika)
 // i klawiaturę — bez tap-to-move. Losowość: ziarno gry z adresu (?debug&seed=…) oraz kontrolowane źródło
 // rzutu na spotkanie (stepRng) ustawiane przez tryb diagnostyczny. Tryb ?debug służy tylko do odczytu stanu
@@ -99,7 +100,7 @@ async function placeWithRoom(dir, need, { terrain = 'any', extra = null } = {}) 
     const sc = window.__szlaki.game.scene.getScene('Overworld');
     const D = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
     const ok = (x, y) => {
-      if (!sc.isWalkable(x, y) || sc.actorAt(x, y) || sc.exitAt(x, y)) return false; // wyjścia z mapy omijamy
+      if (!sc.isWalkable(x, y) || (sc.actorAt(x, y) || sc.trainerSightAt(x, y)) || sc.exitAt(x, y)) return false; // wyjścia z mapy omijamy
       const ch = sc.grid[y][x];
       if (terrain === 'grass') return ch === ',';
       if (terrain === 'safe') return ch !== ',' && ch !== 'r';
@@ -107,7 +108,7 @@ async function placeWithRoom(dir, need, { terrain = 'any', extra = null } = {}) 
     };
     const run = (x, y, d) => { let n = 0; const [dx, dy] = D[d]; for (let i = 1; i <= 12; i++) { if (ok(x + dx * i, y + dy * i)) n++; else break; } return n; };
     for (let y = 1; y < sc.grid.length - 1; y++) for (let x = 1; x < sc.grid[0].length - 1; x++) {
-      if (!sc.isWalkable(x, y) || sc.actorAt(x, y) || sc.exitAt(x, y)) continue;
+      if (!sc.isWalkable(x, y) || (sc.actorAt(x, y) || sc.trainerSightAt(x, y)) || sc.exitAt(x, y)) continue;
       if (terrain === 'safe' && !ok(x, y)) continue;
       if (run(x, y, dir) < need) continue;
       if (extra && run(x, y, extra) < need) continue;
@@ -357,7 +358,7 @@ try {
   const spot = await S(() => {
     const sc = window.__szlaki.game.scene.getScene('Overworld');
     for (let y = 2; y < sc.grid.length - 1; y++) for (let x = 1; x < sc.grid[0].length - 1; x++) {
-      if (sc.isWalkable(x, y) && !sc.actorAt(x, y) && sc.grid[y][x - 1] === 'T' && sc.isWalkable(x + 1, y)) {
+      if (sc.isWalkable(x, y) && !(sc.actorAt(x, y) || sc.trainerSightAt(x, y)) && sc.grid[y][x - 1] === 'T' && sc.isWalkable(x + 1, y)) {
         window.__szlaki.stores.bus.emit('teleport', { x, y, facing: 'down' });
         return { x, y };
       }
@@ -444,7 +445,7 @@ try {
   const spot = await S(() => {
     const sc = window.__szlaki.game.scene.getScene('Overworld');
     for (let y = 2; y < sc.grid.length - 1; y++) for (let x = 1; x < sc.grid[0].length - 1; x++) {
-      if (sc.grid[y][x] === ',' && !sc.actorAt(x, y) && sc.grid[y][x + 1] === 'T') {
+      if (sc.grid[y][x] === ',' && !(sc.actorAt(x, y) || sc.trainerSightAt(x, y)) && sc.grid[y][x + 1] === 'T') {
         window.__szlaki.stores.bus.emit('teleport', { x, y, facing: 'down' });
         return { x, y };
       }
@@ -1249,6 +1250,211 @@ try {
   const ok = stored?.wersjaDanych === 2 && after.length === src.length && after.every((c, i) => c.pokemon === src[i].pokemon && c.neutralna && c.abilityId === src[i].ability && c.heldItemId === src[i].heldItem && JSON.stringify(c.stats) === JSON.stringify(src[i].stats) && c.evolutionState && c.evolutionState.cancelledAtLevel === null) && restored.ruszyl && resaved?.wersjaDanych === SAVE_V && resaved?.stworzenie?.ability === null && resaved?.stworzenie?.nature;
   record('E7', 'Stary zapis v2 z IndexedDB: stworzenia dostają naturę neutralną, zdolność i przedmiot zachowane, statystyki bez zmian; ponowny zapis w v3', ok, { zapisV2: stored, poWczytaniu: after, zapisPo: resaved, sterowanie: restored });
 } catch (e) { fail('E7', 'Zgodność zapisu v2', e); }
+
+
+// ═════════════ Sprint 5: trenerzy, dialogi i walki trenerskie ═════════════
+const BARTEK = 'polana-bartek';
+const IGA = 'zagajnik-iga';
+const trainerFlags = () => S(() => { const f = window.__szlaki.stores.useGame.getState().flags; return { bartek: !!f['trainer:polana-bartek:defeated'], iga: !!f['trainer:zagajnik-iga:defeated'] }; });
+const trainerAt = (id) => S((id) => window.__szlaki.game.scene.getScene('Overworld').trainerInfo().find((t) => t.id === id) ?? null, id);
+const lockState = () => S(() => { const u = window.__szlaki.stores.useUi.getState(); const g = window.__szlaki.stores.useGame.getState(); return { gameMode: u.gameMode, inputLocked: u.inputLocked, source: u.sourceEntityId, mode: u.mode, money: g.player.money, herb: g.bag.herb ?? 0, berry: g.bag['soothe-berry'] ?? 0 }; });
+const countBattleStarts = () => S(() => {
+  window.__bstarts = 0;
+  if (!window.__bsSub) window.__bsSub = window.__szlaki.stores.bus.on('battle-start', () => { window.__bstarts = (window.__bstarts ?? 0) + 1; });
+});
+const battleStarts = () => S(() => window.__bstarts ?? 0);
+const goTo = async (loc, x, y, facing) => {
+  await S(({ loc, x, y, facing }) => window.__szlaki.stores.bus.emit('travel', { regionId: 'kraina-szlakow', locationId: loc, spawnPointId: 'start', x, y, facing }), { loc, x, y, facing });
+  await waitArrival(loc);
+  await S(({ x, y, facing }) => window.__szlaki.stores.bus.emit('teleport', { x, y, facing }), { x, y, facing });
+  await idle(300);
+};
+/** Treść kolejnych okienek dialogu (każde czytane po chwili, gdy tekst jest już cały). */
+async function readDialogs() {
+  const out = [];
+  for (let i = 0; i < 20; i++) {
+    if (!(await page.locator('.dialog').count())) break;
+    await idle(450);
+    if (!(await page.locator('.dialog').count())) break;
+    out.push(((await page.locator('.dialog').textContent()) ?? '').trim());
+    await page.locator('.dialog').click();
+    await idle(120);
+  }
+  return out;
+}
+const waitBattleMode = () => page.waitForFunction(() => window.__szlaki.stores.useUi.getState().mode === 'battle' && window.__szlaki.stores.useBattle.getState().phase === 'choose', null, { timeout: 30000 });
+/** Wygrana z trenerem: stworzenia trenera z 1 PŻ, ataki do końca, „Dalej”; zwraca wynik i komunikaty po walce. */
+async function winTrainerBattle() {
+  await waitBattleMode();
+  await S(() => {
+    const B = window.__szlaki.stores.useBattle;
+    const engine = structuredClone(B.getState().engine);
+    engine.sides[1].party.forEach((c) => { c.hp = 1; });
+    B.setState({ engine });
+  });
+  if (!(await fightToEnd(false))) throw new Error('walka z trenerem nie dobiegła końca');
+  const outcome = await S(() => window.__szlaki.stores.useBattle.getState().engine.outcome);
+  await page.getByRole('button', { name: 'Dalej' }).click();
+  const notes = await readDialogs();
+  await ensureMap();
+  return { outcome, notes };
+}
+
+// ───────────── S1. Rozmowa z trenerem (przycisk Akcja): dialog → jedna walka → zwycięstwo, nagroda raz, nowy dialog ─────────────
+try {
+  await ensureMap();
+  await setStepRng('miss');
+  if ((await trainerFlags()).bartek) throw new Error('Bartek już pokonany przed testem');
+  await goTo(POLANA, 23, 13, 'right');
+  await countBattleStarts();
+  const before = await lockState();
+  await page.getByRole('button', { name: 'Akcja' }).click();
+  await page.locator('.dialog').waitFor({ timeout: 8000 });
+  await idle(400);
+  const firstLine = ((await page.locator('.dialog').textContent()) ?? '').trim();
+  const during = await lockState();
+  await readDialogs();
+  await waitBattleMode();
+  const battle = await S(() => {
+    const e = window.__szlaki.stores.useBattle.getState().engine;
+    return { kind: e.sides[1].kind, name: e.sides[1].name, ai: e.sides[1].ai, team: e.sides[1].party.map((c) => ({ p: c.pokemon, lvl: c.level, nature: c.nature, ability: c.abilityId, moves: c.moves.map((m) => m.name) })) };
+  });
+  const runDisabled = await page.getByRole('button', { name: 'Ucieczka' }).isDisabled();
+  await shot('s1-trainer-battle');
+  const res = await winTrainerBattle();
+  const after = await lockState();
+  const flags = await trainerFlags();
+  // Ponowna rozmowa: już tylko dialog po walce — bez walki i bez drugiej nagrody.
+  await goTo(POLANA, 23, 13, 'right');
+  await page.getByRole('button', { name: 'Akcja' }).click();
+  await page.locator('.dialog').waitFor({ timeout: 8000 });
+  const talkAgain = await lockState();
+  const again = await readDialogs();
+  await ensureMap();
+  const final = await lockState();
+  const starts = await battleStarts();
+  const ok =
+    firstLine.includes('Tropiciel Bartek') && firstLine.includes('Hej, stój') &&
+    during.gameMode === 'ENCOUNTER_STARTING' && during.inputLocked && during.source === 'trainer:polana-bartek' &&
+    battle.kind === 'trainer' && battle.ai === 'BASIC' && JSON.stringify(battle.team.map((t) => t.p)) === '["pidgey","sentret"]' && battle.team[0].nature === 'hardy' && battle.team[0].ability === 'keen-eye' && JSON.stringify(battle.team[0].moves) === '["tackle","sand-attack"]' && runDisabled &&
+    res.outcome === 'win' && res.notes.join(' ').includes('Pokonujesz: Tropiciel Bartek') && res.notes.join(' ').includes('Dobra walka') &&
+    flags.bartek && after.money - before.money === 150 && after.herb - before.herb === 1 &&
+    talkAgain.gameMode === 'EXPLORATION' && again.join(' ').includes('Dobra walka') && final.money === after.money && final.herb === after.herb && starts === 1;
+  record('S1', 'Rozmowa (Akcja) z trenerem: dialog przy zamrożonym graczu → dokładnie jedna walka (ten sam silnik, bez ucieczki) → zwycięstwo, flaga, nagroda raz, potem tylko dialog po walce', ok, { pierwszaLinia: firstLine, wTrakcie: during, walka: battle, ucieczkaZablokowana: runDisabled, wynik: res, przed: before, po: after, flagi: flags, ponownaRozmowa: again, koniec: final, walk: starts });
+} catch (e) { fail('S1', 'Rozmowa i zwycięstwo z trenerem', e); }
+
+// ───────────── S2. Pole widzenia: trener zauważa gracza, podchodzi; gracz zamrożony; inne wyzwalacze zablokowane; przegrana ─────────────
+try {
+  await ensureMap();
+  await setStepRng('miss');
+  await goTo(ZAGAJNIK, 14, 15, 'up');
+  await resetCooldown();
+  await countBattleStarts();
+  const ig0 = await trainerAt(IGA);
+  await hold(...OFF.up, 1300, false); // 15 → 14 → 13 → 12: wejście w pole widzenia (3 pola)
+  await page.locator('.dialog').waitFor({ timeout: 10000 });
+  const seenAt = await pos();
+  const igNear = await trainerAt(IGA);
+  await idle(800); // palec nadal na joysticku
+  const frozen = await pos();
+  await page.mouse.up();
+  const during = await lockState();
+  // Inne wyzwalacze w tym czasie: wydarzenie tego trenera, inne spotkanie — odrzucone.
+  await S((id) => window.__szlaki.stores.bus.emit('trainer-event', { trainerId: id }), IGA);
+  const other = await S(() => window.__szlaki.stores.useUi.getState().tryStartEncounter('static:test'));
+  const text = ((await page.locator('.dialog').textContent()) ?? '').trim();
+  // Przegrana: drużyna z 1 PŻ, a stworzenia trenera zawsze szybsze i silniejsze (deterministycznie).
+  await S(() => window.__szlaki.stores.useGame.setState((s) => ({ party: s.party.map((c) => ({ ...c, hp: 1 })) })));
+  await readDialogs();
+  await waitBattleMode();
+  await S(() => {
+    const B = window.__szlaki.stores.useBattle;
+    const engine = structuredClone(B.getState().engine);
+    engine.sides[0].party.forEach((c) => { c.hp = Math.min(c.hp, 1); });
+    engine.sides[1].party.forEach((c) => { c.stats = { ...c.stats, spe: 999, atk: 999, spa: 999 }; });
+    B.setState({ engine });
+  });
+  await fightToEnd(false);
+  const outcome = await S(() => window.__szlaki.stores.useBattle.getState().engine.outcome);
+  await page.getByRole('button', { name: 'Dalej' }).click();
+  await afterBattleBackOnMap();
+  if (outcome === 'lose') await waitArrival(POLANA);
+  const p = await where();
+  const flags = await trainerFlags();
+  const starts = await battleStarts();
+  await shot('s2-after-loss');
+  const ok =
+    same([ig0.x, ig0.y], [17, 12]) && same(seenAt, [14, 12]) && same([igNear.x, igNear.y], [15, 12]) && igNear.engaged && same(frozen, seenAt) &&
+    during.gameMode === 'ENCOUNTER_STARTING' && during.source === 'trainer:zagajnik-iga' && other === null && text.includes('Zielarka Iga') &&
+    starts === 1 && !flags.iga && p.lokacja === POLANA && p.punkt === 'stacja-opieki';
+  record('S2', 'Pole widzenia: Iga zauważa gracza z 3 pól i podchodzi; gracz zamrożony, inne wyzwalacze odrzucone, jedna walka; przegrana → Stacja Opieki, trener NIE oznaczony', outcome === 'lose' ? ok : 'INFO', { start: ig0, zauwazony: seenAt, igaObok: igNear, palecTrzymany: frozen, blokada: during, inneSpotkanie: other, dialog: text, wynik: outcome, po: p, flagi: flags, walk: starts });
+} catch (e) { fail('S2', 'Pole widzenia i przegrana', e); }
+
+// ───────────── S3. Wydarzenie (pole na skrzyżowaniu): trener woła i podchodzi; zwycięstwo; rewanż bez drugiej nagrody ─────────────
+try {
+  await ensureMap();
+  await setStepRng('miss');
+  await S(() => window.__szlaki.stores.useGame.getState().healAll());
+  await goTo(ZAGAJNIK, 14, 7, 'down');
+  await resetCooldown();
+  await countBattleStarts();
+  const igHome = await trainerAt(IGA);
+  const before = await lockState();
+  await hold(...OFF.down, 700); // 7 → 8 → 9 (pole wydarzenia)
+  await page.locator('.dialog').waitFor({ timeout: 10000 });
+  const at = await pos();
+  const igNear = await trainerAt(IGA);
+  const during = await lockState();
+  await readDialogs();
+  const res = await winTrainerBattle();
+  const afterWin = await lockState();
+  const flags = await trainerFlags();
+  const igBack = await trainerAt(IGA);
+  // Rewanż (REMATCH): rozmowa po pokonaniu — walka bez nagrody.
+  await goTo(ZAGAJNIK, 16, 12, 'right');
+  await page.getByRole('button', { name: 'Akcja' }).click();
+  await page.locator('.dialog').waitFor({ timeout: 8000 });
+  const rematchLine = ((await page.locator('.dialog').textContent()) ?? '').trim();
+  await readDialogs();
+  const res2 = await winTrainerBattle();
+  const afterRematch = await lockState();
+  const starts = await battleStarts();
+  const near = Math.abs(igNear.x - at[0]) + Math.abs(igNear.y - at[1]) === 1;
+  const ok =
+    same(at, [14, 9]) && near && during.source === 'trainer:zagajnik-iga' && res.outcome === 'win' && res.notes.join(' ').includes('Pokonujesz: Zielarka Iga') &&
+    flags.iga && afterWin.money - before.money === 300 && afterWin.berry - before.berry === 1 && same([igBack.x, igBack.y], [igHome.x, igHome.y]) && !igBack.engaged &&
+    rematchLine.includes('Rewanż') && res2.outcome === 'win' && res2.notes.join(' ').includes('rewanż') && afterRematch.money === afterWin.money && afterRematch.berry === afterWin.berry && starts === 2;
+  record('S3', 'Wydarzenie: wejście na pole skrzyżowania → Iga podchodzi, dialog, walka; zwycięstwo (+300 i jagoda raz); rewanż bez nagrody', ok, { pole: at, iga: igNear, blokada: during, wynik: res, po: afterWin, flagi: flags, igaWraca: igBack, rewanz: rematchLine, wynik2: res2, poRewanzu: afterRematch, walk: starts });
+} catch (e) { fail('S3', 'Wydarzenie i rewanż', e); }
+
+// ───────────── S4. Zapis pokonanych trenerów: po wczytaniu wzrok nie wyzwala walki, rozmowa = dialog po walce ─────────────
+try {
+  await ensureMap();
+  await setStepRng('miss');
+  await controlRestored(); // ruch → autozapis
+  await idle(2800);
+  await page.reload();
+  await page.getByRole('button', { name: /Kontynuuj/ }).click({ timeout: 15000 });
+  await waitJoystick();
+  await setStepRng('miss');
+  const flags = await trainerFlags();
+  await goTo(ZAGAJNIK, 14, 15, 'up');
+  await resetCooldown();
+  await countBattleStarts();
+  await hold(...OFF.up, 1100); // przez pole widzenia pokonanej Igi
+  await idle(700);
+  const walked = await pos();
+  const noDialog = (await page.locator('.dialog').count()) === 0;
+  const state = await lockState();
+  await goTo(POLANA, 23, 13, 'right');
+  await page.getByRole('button', { name: 'Akcja' }).click();
+  await page.locator('.dialog').waitFor({ timeout: 8000 });
+  const talk = await readDialogs();
+  await ensureMap();
+  const starts = await battleStarts();
+  const ok = flags.bartek && flags.iga && walked[1] <= 12 && noDialog && state.gameMode === 'EXPLORATION' && talk.join(' ').includes('Dobra walka') && starts === 0;
+  record('S4', 'Zapis i wczytanie: pokonani trenerzy zostają pokonani — wzrok Igi nie wyzwala walki, Bartek mówi dialog po walce', ok, { flagi: flags, poPrzejsciu: walked, bezDialogu: noDialog, stan: state, rozmowa: talk, walk: starts });
+} catch (e) { fail('S4', 'Zapis pokonanych trenerów', e); }
 
 // ───────────── U1. Wersja i ręczne sprawdzenie aktualizacji (Menu) ─────────────
 try {

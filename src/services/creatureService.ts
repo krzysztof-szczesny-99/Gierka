@@ -1,6 +1,7 @@
 // Budowanie stworzeń z danych PokéAPI (dzikie, startery) i pomocnicze ładowanie ruchów.
 
 import type { EncounterEntry, EncounterTable } from '../config/encounters';
+import type { TrainerMemberDef } from '../config/trainers';
 import { assertAllowedSpecies, rollLevel } from '../game/encounterZones';
 import { FALLBACK_DAMAGE_MOVE } from '../config/moveOverrides';
 import { RULES } from '../config/rules';
@@ -85,6 +86,19 @@ export async function buildStarter(name: string, level: number, rng: Rng): Promi
   const bundle = await loadBundle(name);
   const moves = await movesFor(bundle.pokemon, level);
   const creature = createCreature({ ...bundle, level, moves, rng, metAt: 'Polana Startowa', shiny: false });
+  return { creature, bundle };
+}
+
+/**
+ * Stworzenie trenera (Sprint 5): gatunek, poziom, ruchy, natura, zdolność i przedmiot z danych trenera;
+ * czego dane nie podają — jak u dzikiego stworzenia (ruchy z listy nauki, natura i IV z ziarna gry).
+ */
+export async function buildTrainerCreature(member: TrainerMemberDef, trainerName: string, rng: Rng): Promise<{ creature: Creature; bundle: CreatureBundle }> {
+  const bundle = await loadBundle(member.pokemonId);
+  const moves = member.moves?.length ? await Promise.all(member.moves.slice(0, RULES.maxMoves).map((n) => getMove(n))) : await movesFor(bundle.pokemon, member.level);
+  const creature = createCreature({ ...bundle, level: member.level, moves, rng, metAt: trainerName, shiny: false, mighty: false, nature: member.nature });
+  if (member.abilityId) creature.abilityId = member.abilityId;
+  creature.heldItemId = member.heldItemId ?? null;
   return { creature, bundle };
 }
 

@@ -108,9 +108,9 @@ try {
     E.configure({ stepRng: E.createSequenceRng([0]) });
     const D = { right: [1, 0], left: [-1, 0], down: [0, 1], up: [0, -1] };
     for (let y = 1; y < sc.grid.length - 1; y++) for (let x = 1; x < sc.grid[0].length - 1; x++) {
-      if (!sc.isWalkable(x, y) || sc.actorAt(x, y)) continue;
+      if (!sc.isWalkable(x, y) || (sc.actorAt(x, y) || sc.trainerSightAt(x, y))) continue;
       for (const [d, [dx, dy]] of Object.entries(D)) {
-        if (sc.grid[y + dy]?.[x + dx] === ',' && !sc.actorAt(x + dx, y + dy)) {
+        if (sc.grid[y + dy]?.[x + dx] === ',' && !(sc.actorAt(x + dx, y + dy) || sc.trainerSightAt(x + dx, y + dy))) {
           window.__szlaki.stores.bus.emit('teleport', { x, y, facing: d });
           window.__szlaki.stores.useUi.setState({ encounterCooldown: 0 });
           return { dir: d, from: [x, y] };

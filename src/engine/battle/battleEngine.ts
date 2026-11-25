@@ -10,7 +10,7 @@ import type { Rng } from '../rng';
 import { accuracyStageMultiplier, addEvs, calcStats, stageMultiplier } from '../stats';
 import { effectiveness, effectivenessText } from '../typeChart';
 import type { BoostKey, Creature, GrowthTable, MajorStatus, MoveData, PokemonData, TypeChart } from '../types';
-import { chooseMove } from './ai';
+import { chooseMove, chooseSwitch, type AiProfile } from './ai';
 import { attemptCatch } from './catch';
 import { calcDamage } from './damage';
 import {
@@ -330,6 +330,55 @@ export function createWildBattle(p: WildBattleParams): TurnResult {
   return { state, events };
 }
 
+export interface TrainerBattleParams extends Omit<WildBattleParams, 'enemy' | 'captureRate'> {
+  trainerName: string;
+  enemies: Creature[];
+  ai: AiProfile;
+}
+
+/**
+ * Walka z trenerem (Sprint 5) — ten sam silnik co walka z dzikim stworzeniem: strona przeciwnika „trainer”
+ * (bez ucieczki i łapania), drużyna kilku stworzeń, wybór ruchów i zmian według profilu AI.
+ */
+export function createTrainerBattle(p: TrainerBattleParams): TurnResult {
+  const party = structuredClone(p.party);
+  const lead = party.findIndex((c) => c.hp > 0);
+  if (lead < 0) throw new Error('Brak sprawnych stworzeń w drużynie.');
+  const enemies = structuredClone(p.enemies);
+  const first = enemies.findIndex((c) => c.hp > 0);
+  if (first < 0) throw new Error('Trener nie ma sprawnych stworzeń.');
+  const state: BattleState = {
+    format: 'single',
+    turn: 0,
+    sides: [
+      { kind: 'player', name: p.playerName, party, active: [lead] },
+      { kind: 'trainer', name: p.trainerName, party: enemies, active: [first], ai: p.ai },
+    ],
+    boosts: {},
+    volatiles: {},
+    pokemon: p.pokemon,
+    moves: p.moves,
+    growth: p.growth,
+    typeChart: p.typeChart,
+    captureRate: 0,
+    participants: [party[lead].uid],
+    escapeAttempts: 0,
+    awaitingSwitch: false,
+    outcome: null,
+    caught: null,
+    pendingLearns: [],
+  };
+  const events: BattleEvent[] = [];
+  events.push(msg(`${p.trainerName} wyzywa Cię do walki!`));
+  events.push({ t: 'sendOut', side: 1, uid: enemies[first].uid });
+  events.push(msg(`${p.trainerName} wysyła: ${displayName(enemies[first])}!`));
+  events.push({ t: 'sendOut', side: 0, uid: party[lead].uid });
+  events.push(msg(`Naprzód, ${displayName(party[lead])}!`));
+  onEntry(state, 1, enemies[first], events);
+  onEntry(state, 0, party[lead], events);
+  return { state, events };
+}
+
 /** Zdolność działająca przy wejściu do walki: obniżenie statystyki aktywnego przeciwnika. */
 function onEntry(state: BattleState, side: SideIndex, c: Creature, events: BattleEvent[]): void {
   const e = abilityEffect(c, 'entry-lower-foe');
@@ -390,9 +439,21 @@ export function resolveTurn(input: BattleState, action: PlayerAction, rng: Rng):
     const idx = slot && slot.pp > 0 ? action.moveIndex : -1;
     queue.push(queueEntry(state, 0, player, idx, rng));
   }
-  const aiMode = state.sides[1].kind === 'trainer' ? 'smart' : 'random';
-  const enemyMove = chooseMove(enemy, player, state.moves, state.typeChart, rng, aiMode);
-  queue.push(queueEntry(state, 1, enemy, enemyMove, rng));
+  // Przeciwnik: dzikie — losowy ruch (jak dotąd); trener — profil AI, w BALANCED także zmiana stworzenia.
+  const foeSide = state.sides[1];
+  const profile = foeSide.kind === 'trainer' ? (foeSide.ai ?? 'BALANCED') : null;
+  const switchTo =
+    profile === 'BALANCED' && foeSide.switchedAtTurn !== state.turn - 1
+      ? chooseSwitch(enemy, foeSide.party, foeSide.active[0], player, state.moves, state.typeChart)
+      : null;
+  if (switchTo !== null) {
+    // Zmiana stworzenia wyprzedza ruchy (zajmuje turę przeciwnika).
+    switchIn(state, 1, switchTo, events);
+    foeSide.switchedAtTurn = state.turn;
+  } else {
+    const enemyMove = chooseMove(enemy, player, state.moves, state.typeChart, rng, profile ?? 'random');
+    queue.push(queueEntry(state, 1, enemy, enemyMove, rng));
+  }
   queue.sort((a, b) => b.priority - a.priority || Number(b.first) - Number(a.first) || b.speed - a.speed || a.tie - b.tie);
 
   for (const q of queue) {

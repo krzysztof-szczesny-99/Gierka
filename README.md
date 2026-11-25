@@ -105,6 +105,12 @@ zapis, zbuforowane dane i sprite'y; w trawie spotkasz offline tylko gatunki, kt�
     „Ewoluuj” / „Przerwij”, przycisk w Drużynie) i przez kamień z Torby. Ruchy, poziom i doświadczenie zostają.
     Warunki, których silnik nie obsługuje (przyjaźń, pora dnia, wymiana, miejsce, formy regionalne), są oznaczone
     NOT_IMPLEMENTED.
+- Trenerzy (Sprint 5, `src/config/trainers.ts`): **Tropiciel Bartek** pilnuje drogi do Zagajnika (wschodnia część
+  Polany, pole widzenia 3 pola w dół) i **Zielarka Iga** w Zagajniku (pole widzenia, a także wydarzenie na skrzyżowaniu
+  ścieżek; rewanż po porażce). Interakcja: rozmowa (przycisk Akcja albo wejście w trenera), pole widzenia albo wydarzenie —
+  zawsze przez centralną blokadę spotkań. Gracz zamiera, trener podchodzi bezpieczną ścieżką, dialog, a potem dokładnie
+  jedna walka w tym samym silniku. Profile AI: BASIC, BALANCED (zmienia stworzenia), AGGRESSIVE; żaden nie wybiera ruchu bez PP.
+  Wygrana: flaga w zapisie, nagroda tylko raz, nowy dialog. Przegrana: powrót do Stacji Opieki, trener niepokonany.
 - Zapis w formacie v3 (Sprint 4: natura, zdolność, przedmiot i stan ewolucji stworzeń; wcześniej v2 — położenie w świecie). Starsze zapisy (v1) są migrowane automatycznie —
   postęp i pozycja na Polanie zostają. Błędna lokacja lub pozycja w zapisie → bezpieczny punkt pojawienia się.
 - Ruch po siatce: joystick ekranowy, opcjonalnie klawiatura; bieg; kamera z dopasowaniem przybliżenia.
@@ -131,7 +137,7 @@ zapis, zbuforowane dane i sprite'y; w trawie spotkasz offline tylko gatunki, kt�
 
 ## Zaplanowane (kolejne etapy)
 
-- Etap 2: trenerzy z AI, kolejne zdolności i przedmioty, trudniejsze warunki ewolucji, kolejne lokacje (Wzgórza Wiatru), import map z Tiled.
+- Etap 2: kolejni trenerzy i lokacje, kolejne zdolności i przedmioty, trudniejsze warunki ewolucji, kolejne lokacje (Wzgórza Wiatru), import map z Tiled.
 - Etap 3: walki podwójne, ruchy wieloturowe, pogoda, współdzielony EXP, lepszy magazyn.
 - Etap 4: otwarte strefy (rzut kapsułą z mapy, unik, zachowania stworzeń), pora dnia, zadania badawcze.
 - Etap 5: pierwsza przygoda (8 prób), drugi region, megaewolucje, interakcje z towarzyszem.
@@ -143,7 +149,7 @@ zapis, zbuforowane dane i sprite'y; w trawie spotkasz offline tylko gatunki, kt�
 - Działa 20 zdolności i 10 przedmiotów trzymanych — pozostałe zdolności z PokéAPI są tylko zapisywane.
 - Ewolucje: tylko poziom i kamień (opcjonalnie z płcią); formy regionalne jeszcze nie ewoluują.
 - Ruchy wieloturowe (np. ładowanie, odpoczynek po ataku) działają jak zwykły atak; pogoda i pola bitwy — brak.
-- Brak trenerów (dane są już przygotowane w modelu).
+- Trenerzy nie mają jeszcze własnych grafik (przebarwiona postać gracza) ani wyboru „tak/nie” przed rewanżem.
 - Nazwy stworzeń i ruchów są angielskie (PokéAPI nie ma języka polskiego).
 - Przerwana walka (zamknięcie aplikacji) nie jest wznawiana — wracasz na mapę sprzed walki.
 

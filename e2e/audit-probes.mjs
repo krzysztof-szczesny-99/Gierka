@@ -56,7 +56,7 @@ function freeDir() {
     let best = 'down', bestN = -1;
     for (const [k, [dx, dy]] of Object.entries(D)) {
       let n = 0;
-      for (let i = 1; i <= 6; i++) { const x = sc.tx + dx * i, y = sc.ty + dy * i; if (sc.isWalkable(x, y) && !sc.actorAt(x, y) && !sc.exitAt(x, y)) n++; else break; }
+      for (let i = 1; i <= 6; i++) { const x = sc.tx + dx * i, y = sc.ty + dy * i; if (sc.isWalkable(x, y) && !(sc.actorAt(x, y) || sc.trainerSightAt(x, y)) && !sc.exitAt(x, y)) n++; else break; }
       if (n > bestN) { bestN = n; best = k; }
     }
     return best;
@@ -77,9 +77,9 @@ async function grassEncounter() {
     const sc = window.__szlaki.game.scene.getScene('Overworld');
     const D = { right: [1, 0], left: [-1, 0], down: [0, 1], up: [0, -1] };
     for (let y = 1; y < sc.grid.length - 1; y++) for (let x = 1; x < sc.grid[0].length - 1; x++) {
-      if (!sc.isWalkable(x, y) || sc.actorAt(x, y)) continue;
+      if (!sc.isWalkable(x, y) || (sc.actorAt(x, y) || sc.trainerSightAt(x, y))) continue;
       for (const [d, [dx, dy]] of Object.entries(D)) {
-        if (sc.grid[y + dy]?.[x + dx] === ',' && !sc.actorAt(x + dx, y + dy)) {
+        if (sc.grid[y + dy]?.[x + dx] === ',' && !(sc.actorAt(x + dx, y + dy) || sc.trainerSightAt(x + dx, y + dy))) {
           window.__szlaki.stores.bus.emit('teleport', { x, y, facing: d });
           return { dir: d, from: [x, y] };
         }

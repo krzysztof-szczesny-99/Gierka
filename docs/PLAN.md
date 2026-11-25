@@ -132,11 +132,11 @@ szlaki-dziczy/
    ├─ main.tsx · App.tsx · vite-env.d.ts
    ├─ api/        pokeapi.ts (kolejka, retry, offline) · raw.ts (typy API) · normalize.ts
    ├─ data/       db.ts (Dexie) · repository.ts (bufor pamięć→IndexedDB→API) · saveGame.ts (zapis/autozapis) · migrations.ts (wersje zapisu)
-   ├─ config/     rules.ts · items.ts (także przedmioty trzymane i kamienie) · natures.ts · abilities.ts · encounters.ts · world.ts (regiony, lokacje, połączenia) · quests.ts · moveOverrides.ts · text.ts
+   ├─ config/     rules.ts · items.ts (także przedmioty trzymane i kamienie) · natures.ts · abilities.ts · encounters.ts · world.ts (regiony, lokacje, połączenia) · trainers.ts (trenerzy) · quests.ts · moveOverrides.ts · text.ts
    ├─ engine/     types.ts · rng.ts · stats.ts (z naturą) · typeChart.ts · experience.ts · moves.ts · creature.ts · evolution.ts
-   │  ├─ battle/  types.ts · damage.ts · status.ts · catch.ts · ai.ts · effects.ts (zdolności i przedmioty) · battleEngine.ts
+   │  ├─ battle/  types.ts · damage.ts · status.ts · catch.ts · ai.ts (profile BASIC/BALANCED/AGGRESSIVE, zmiana stworzenia) · effects.ts (zdolności i przedmioty) · battleEngine.ts (walka z dzikim i z trenerem)
    │  └─ __tests__/ engine.test.ts · fixtures.ts
-   ├─ game/       PhaserGame.tsx · eventBus.ts · input.ts (joystick) · movement.ts (reguły ruchu) · encounterZones.ts (tereny i losowanie) · world.ts (przejścia, wymagania, bezpieczne wejście, walidacja świata) · tiles.ts · art.ts · textures.ts
+   ├─ game/       PhaserGame.tsx · eventBus.ts · input.ts (joystick) · movement.ts (reguły ruchu) · encounterZones.ts (tereny i losowanie) · world.ts (przejścia, wymagania, bezpieczne wejście, walidacja świata) · trainers.ts (wzrok, podejście, wydarzenia, walidacja trenerów) · tiles.ts · art.ts · textures.ts
    │  ├─ maps/    index.ts (rejestr map) · testMap.ts (Polana Startowa) · zagajnik.ts (Szepczący Zagajnik)
    │  └─ scenes/  BootScene.ts · OverworldScene.ts
    ├─ services/   creatureService.ts · encounterService.ts · evolutionService.ts · updateService.ts · bootService.ts

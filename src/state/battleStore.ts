@@ -52,6 +52,10 @@ export interface BattleMeta {
   staticId: string | null;
   zoneId: string | null;
   enemySpecies: SpeciesData | null;
+  /** Walka z trenerem (Sprint 5): jego id, rewanż (bez nagrody) i gatunki drużyny (Atlas) wg uid. */
+  trainerId?: string | null;
+  rematch?: boolean;
+  trainerSpecies?: Record<string, SpeciesData>;
 }
 
 interface BattleStore {

@@ -6,6 +6,7 @@
 
 import * as Phaser from 'phaser';
 import { ENCOUNTER_CONFIG } from '../../config/encounters';
+import { trainerActorId, type TrainerDef } from '../../config/trainers';
 import { getPokemon } from '../../data/repository';
 import type { Dir } from '../../engine/types';
 import type { WildSpawn } from '../../services/creatureService';
@@ -19,6 +20,8 @@ import type { LocationConnection, LocationDef } from '../../config/world';
 import { saveNow } from '../../data/saveGame';
 import { TEST_MAP, type MapDef, type StaticEncounterDef, type ZoneDef } from '../maps/testMap';
 import { checkTravel, connectionAt, getLocation, mapOf, resolveSafeEntry, startLocation, type WorldPosition } from '../world';
+import { approachPath, canChallenge, eventTriggerAt, facingTo, seesPlayer, sightLine, talkKind, trainersIn, type TalkKind } from '../trainers';
+import type { TrainerTrigger } from '../eventBus';
 import {
   charAt,
   DIRS,
@@ -39,6 +42,18 @@ const FOLLOWER_SCALE = 0.36;
 const BLOB_SCALE = 0.75;
 
 /** Widoczne, nieruchome stworzenie specjalne (nie wędruje i nie goni gracza). */
+/** Trener na mapie (Sprint 5). */
+interface TrainerActor {
+  def: TrainerDef;
+  tx: number;
+  ty: number;
+  dir: Dir;
+  container: Phaser.GameObjects.Container;
+  sprite: Phaser.GameObjects.Image;
+  /** Trwa interakcja (podejście, dialog, walka) — inne wyzwalacze tego trenera są ignorowane. */
+  engaged: boolean;
+}
+
 interface StaticActor {
   id: string;
   def: StaticEncounterDef;
@@ -86,6 +101,7 @@ export class OverworldScene extends Phaser.Scene {
   private followerKey = '';
   private followerReq = 0;
   private actors: StaticActor[] = [];
+  private trainers: TrainerActor[] = [];
   private cursors: Phaser.Types.Input.Keyboard.CursorKeys | null = null;
   private keyAction: Phaser.Input.Keyboard.Key | null = null;
   private keyRun: Phaser.Input.Keyboard.Key | null = null;
@@ -112,6 +128,7 @@ export class OverworldScene extends Phaser.Scene {
     this.followerKey = '';
     this.followerReq += 1;
     this.actors = [];
+    this.trainers = [];
     this.layer = null;
     this.waterAlt = false;
     this.cleanups = [];
@@ -168,6 +185,7 @@ export class OverworldScene extends Phaser.Scene {
     // Animacja wody; spotkania specjalne (jedyne widoczne stworzenia, nieruchome); kroki ochronne po wejściu na mapę.
     this.time.addEvent({ delay: 650, loop: true, callback: () => this.animateWater() });
     this.spawnStaticEncounters();
+    this.spawnTrainers();
     useUi.getState().protectSteps(ENCOUNTER_CONFIG.mapEnterSafeSteps);
 
     // Towarzysz (prowadzący drużynę)
@@ -188,6 +206,10 @@ export class OverworldScene extends Phaser.Scene {
       bus.on('battle-end', (p) => this.onBattleEnd(p.actorId, p.outcome)),
       bus.on('teleport', (p) => this.teleport(p.x, p.y, p.facing)),
       bus.on('travel', (p) => this.travelTo(p)),
+      bus.on('trainer-event', (p) => {
+        const t = this.trainers.find((x) => x.def.id === p.trainerId);
+        if (t) this.beginTrainer(t, 'event');
+      }),
     );
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.dispose());
     this.events.once(Phaser.Scenes.Events.DESTROY, () => this.dispose());
@@ -253,10 +275,20 @@ export class OverworldScene extends Phaser.Scene {
 
   private tryStep(dir: Dir, running: boolean): void {
     this.facing = dir;
-    const plan = planStep(this.grid, { x: this.tx, y: this.ty }, dir, (x, y) => !!this.actorAt(x, y));
+    const plan = planStep(this.grid, { x: this.tx, y: this.ty }, dir, (x, y) => this.occupied(x, y));
 
     if (plan.kind === 'contact') {
       this.setHeroFrame(false);
+      const trainer = this.trainerAt(plan.x, plan.y);
+      if (trainer) {
+        // Dotknięcie trenera = rozmowa (jednorazowo na dane pole, jak tabliczki).
+        const key = `${plan.x},${plan.y}`;
+        if (this.lastBump !== key) {
+          this.lastBump = key;
+          this.beginTrainer(trainer, 'talk');
+        }
+        return;
+      }
       const actor = this.actorAt(plan.x, plan.y);
       if (actor) this.startEncounter(actor);
       return;
@@ -308,6 +340,8 @@ export class OverworldScene extends Phaser.Scene {
       this.useConnection(conn);
       return;
     }
+    // Trenerzy: wydarzenie (pole-wyzwalacz) albo wzrok. Gdy trener zaczyna interakcję, losowania nie ma.
+    if (this.checkTrainers()) return;
     // Losowe spotkanie: sprawdzane wyłącznie po wejściu na nowe pole (najwyżej jeden rzut na krok).
     const zone = encounterZoneAt(this.mapDef, this.grid, this.tx, this.ty, useGame.getState().flags);
     const { encounterId } = useUi.getState().registerEncounterStep({ movedToNewTile: true, zone }, encounterStepRng());
@@ -387,6 +421,11 @@ export class OverworldScene extends Phaser.Scene {
   private interactFront(): void {
     const nx = this.tx + DIRS[this.facing].x;
     const ny = this.ty + DIRS[this.facing].y;
+    const trainer = this.trainerAt(nx, ny);
+    if (trainer) {
+      this.beginTrainer(trainer, 'talk');
+      return;
+    }
     const actor = this.actorAt(nx, ny);
     if (actor) {
       this.startEncounter(actor);
@@ -462,6 +501,13 @@ export class OverworldScene extends Phaser.Scene {
   /** Aktualizacja obiektu źródłowego po zakończeniu spotkania (blokadę zwalnia encounterService). */
   private onBattleEnd(actorId: string | null, outcome: EncounterOutcome): void {
     this.lastBump = null;
+    const t = this.trainers.find((x) => trainerActorId(x.def.id) === actorId);
+    if (t) {
+      // Po walce (każdy wynik) trener wraca na swoje miejsce; pokonany nie wyzwala już walki wzrokiem.
+      this.placeTrainer(t, t.def.position.x, t.def.position.y, t.def.direction);
+      t.engaged = false;
+      return;
+    }
     const a = this.actors.find((x) => x.id === actorId);
     if (!a) return;
     // Po wygranej lub złapaniu stworzenie specjalne znika na stałe (flaga w zapisie); inaczej zostaje na miejscu.
@@ -545,6 +591,191 @@ export class OverworldScene extends Phaser.Scene {
     return this.actors.find((a) => !a.removed && a.tx === x && a.ty === y);
   }
 
+  private trainerAt(x: number, y: number): TrainerActor | undefined {
+    return this.trainers.find((t) => t.tx === x && t.ty === y);
+  }
+
+  /** Pole zajęte przez postać (stworzenie specjalne albo trener). */
+  private occupied(x: number, y: number): boolean {
+    return !!this.actorAt(x, y) || !!this.trainerAt(x, y);
+  }
+
+  // ───────────────────────────── trenerzy (Sprint 5) ─────────────────────────────
+
+  private spawnTrainers(): void {
+    for (const def of trainersIn(this.location.id)) {
+      const shadow = this.add.ellipse(0, -1, 11, 4, 0x000000, 0.28);
+      const sprite = this.add.image(0, 0, `trainer-${def.look}-down-0`).setOrigin(0.5, 1);
+      const container = this.add.container(0, 0, [shadow, sprite]);
+      const t: TrainerActor = { def, tx: def.position.x, ty: def.position.y, dir: def.direction, container, sprite, engaged: false };
+      this.trainers.push(t);
+      this.placeTrainer(t, def.position.x, def.position.y, def.direction);
+    }
+    // Towarzysz nie może stać na polu trenera.
+    if (this.followerTile && this.trainerAt(this.followerTile.x, this.followerTile.y)) this.placeFollowerBehind();
+  }
+
+  private placeTrainer(t: TrainerActor, x: number, y: number, dir: Dir): void {
+    this.tweens.killTweensOf(t.container);
+    t.tx = x;
+    t.ty = y;
+    this.faceTrainer(t, dir);
+    t.container.setPosition(tileCenterX(x), tileBottomY(y));
+    t.container.setDepth(tileBottomY(y) + 9);
+  }
+
+  private faceTrainer(t: TrainerActor, dir: Dir): void {
+    t.dir = dir;
+    const base = dir === 'left' ? 'right' : dir;
+    t.sprite.setTexture(`trainer-${t.def.look}-${base}-0`);
+    t.sprite.setFlipX(dir === 'left');
+  }
+
+  /** Pole przezroczyste dla wzroku: dostępne i bez innej postaci (gracz jest sprawdzany osobno). */
+  private sightOpen = (x: number, y: number): boolean => isWalkable(this.grid, x, y) && !this.occupied(x, y);
+
+  /** Wyzwalacze trenerów po kroku gracza: najpierw wydarzenie, potem wzrok (w kolejności z danych). */
+  private checkTrainers(): boolean {
+    const flags = useGame.getState().flags;
+    const evt = eventTriggerAt(
+      this.trainers.map((t) => t.def),
+      this.tx,
+      this.ty,
+      flags,
+    );
+    if (evt) {
+      const t = this.trainers.find((x) => x.def.id === evt.id);
+      if (t && this.beginTrainer(t, 'event')) return true;
+    }
+    for (const t of this.trainers) {
+      if (t.engaged || !canChallenge(t.def, flags) || t.def.sightRange <= 0) continue;
+      if (seesPlayer({ x: t.tx, y: t.ty }, t.dir, t.def.sightRange, { x: this.tx, y: this.ty }, this.sightOpen) === null) continue;
+      if (this.beginTrainer(t, 'sight')) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Interakcja z trenerem — wspólna dla rozmowy, wzroku i wydarzenia. Walka przejmuje centralną blokadę
+   * (useUi.tryStartEncounter): gracz zamiera, inne wyzwalacze są zablokowane, trener podchodzi (jeśli jest
+   * bezpieczna ścieżka), pojawia się dialog, a po nim — dokładnie jedna walka.
+   */
+  private beginTrainer(t: TrainerActor, trigger: TrainerTrigger): boolean {
+    if (this.disposed || t.engaged) return false;
+    const flags = useGame.getState().flags;
+    let kind: TalkKind;
+    if (trigger === 'talk') kind = talkKind(t.def, flags);
+    else if (canChallenge(t.def, flags)) kind = 'battle';
+    else return false;
+
+    if (kind === 'after') {
+      // Pokonany trener (ONCE) — zwykła rozmowa, bez walki.
+      this.faceTrainer(t, facingTo({ x: t.tx, y: t.ty }, { x: this.tx, y: this.ty }));
+      bus.emit('dialog', { lines: t.def.dialogueAfter.map((l) => `${t.def.name}: „${l}”`) });
+      return true;
+    }
+
+    const encounterId = useUi.getState().tryStartEncounter(trainerActorId(t.def.id), { explicit: trigger === 'talk' });
+    if (!encounterId) return false;
+    t.engaged = true;
+    // Gracz zamiera od razu (palec na joysticku nie porusza postaci aż do końca spotkania).
+    releaseInput('lock');
+    this.input.keyboard?.resetKeys();
+    this.setHeroFrame(false);
+    if (trigger !== 'talk') this.showAlertAt(t.container.x, t.container.y);
+
+    const player = { x: this.tx, y: this.ty };
+    const path =
+      approachPath({ x: t.tx, y: t.ty }, player, (x, y) => this.trainerCanWalk(t, x, y)) ?? [];
+    const afterWalk = () => {
+      if (this.disposed || useUi.getState().activeEncounterId !== encounterId) return;
+      this.faceTrainer(t, facingTo({ x: t.tx, y: t.ty }, player));
+      // Gracz patrzy na trenera, jeśli stoją obok siebie.
+      if (Math.abs(t.tx - this.tx) + Math.abs(t.ty - this.ty) === 1) {
+        this.facing = facingTo(player, { x: t.tx, y: t.ty });
+        this.setHeroFrame(false);
+      }
+      const lines = kind === 'rematch' ? (t.def.dialogueRematch ?? t.def.dialogueBefore) : t.def.dialogueBefore;
+      let started = false;
+      useUi.getState().showDialog(
+        lines.map((l) => `${t.def.name}: „${l}”`),
+        () => {
+          // Walka rozpoczyna się dokładnie raz i tylko dla wciąż aktywnej blokady tego spotkania.
+          if (started || this.disposed || useUi.getState().activeEncounterId !== encounterId) return;
+          started = true;
+          const cam = this.cameras.main;
+          cam.flash(220, 255, 255, 255);
+          cam.shake(180, 0.004);
+          bus.emit('encounter', { encounterId, source: { kind: 'trainer', actorId: trainerActorId(t.def.id), trainerId: t.def.id, rematch: kind === 'rematch' } });
+        },
+      );
+    };
+    this.walkTrainer(t, path, afterWalk);
+    return true;
+  }
+
+  /** Pole dostępne dla podchodzącego trenera: bez przeszkód, postaci, towarzysza i wyjść z mapy. */
+  private trainerCanWalk(t: TrainerActor, x: number, y: number): boolean {
+    if (!isWalkable(this.grid, x, y)) return false;
+    if (this.actorAt(x, y)) return false;
+    const other = this.trainerAt(x, y);
+    if (other && other !== t) return false;
+    if (this.followerTile && this.followerTile.x === x && this.followerTile.y === y) return false;
+    return !connectionAt(this.location, x, y);
+  }
+
+  private walkTrainer(t: TrainerActor, path: { x: number; y: number }[], done: () => void): void {
+    const next = path.shift();
+    if (!next || this.disposed) {
+      done();
+      return;
+    }
+    this.faceTrainer(t, facingTo({ x: t.tx, y: t.ty }, next));
+    t.tx = next.x;
+    t.ty = next.y;
+    t.container.setDepth(tileBottomY(next.y) + 9);
+    this.tweens.add({
+      targets: t.container,
+      x: tileCenterX(next.x),
+      y: tileBottomY(next.y),
+      duration: stepDurationMs(false),
+      onComplete: () => this.walkTrainer(t, path, done),
+    });
+  }
+
+  private showAlertAt(x: number, y: number): void {
+    const t = this.add
+      .text(x, y - 18, '!', {
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '12px',
+        fontStyle: 'bold',
+        color: '#ffffff',
+        backgroundColor: '#ef6461',
+        padding: { x: 3, y: 0 },
+      })
+      .setOrigin(0.5, 1)
+      .setDepth(10_000);
+    this.tweens.add({ targets: t, y: t.y - 4, duration: 180, yoyo: true });
+    this.time.delayedCall(800, () => t.destroy());
+  }
+
+  /** Diagnostyka i testy: trener stoi na polu, widzi je albo pole wyzwala wydarzenie (null — pole „spokojne”). */
+  trainerSightAt(x: number, y: number): string | null {
+    const flags = useGame.getState().flags;
+    for (const t of this.trainers) {
+      if (t.tx === x && t.ty === y) return t.def.id;
+      if (!canChallenge(t.def, flags)) continue;
+      if ((t.def.eventTriggers ?? []).some((e) => e.x === x && e.y === y)) return t.def.id;
+      if (sightLine({ x: t.tx, y: t.ty }, t.dir, t.def.sightRange, (px, py) => isWalkable(this.grid, px, py)).some((p) => p.x === x && p.y === y)) return t.def.id;
+    }
+    return null;
+  }
+
+  /** Diagnostyka i testy: stan trenerów na mapie. */
+  trainerInfo(): { id: string; x: number; y: number; dir: Dir; engaged: boolean }[] {
+    return this.trainers.map((t) => ({ id: t.def.id, x: t.tx, y: t.ty, dir: t.dir, engaged: t.engaged }));
+  }
+
   // ───────────────────────────── towarzysz ─────────────────────────────
 
   private refreshFollower(): void {
@@ -589,7 +820,7 @@ export class OverworldScene extends Phaser.Scene {
 
   private placeFollowerBehind(): void {
     if (!this.follower) return;
-    const spot = followerSpotBehind(this.grid, { x: this.tx, y: this.ty }, this.facing, (x, y) => !!this.actorAt(x, y));
+    const spot = followerSpotBehind(this.grid, { x: this.tx, y: this.ty }, this.facing, (x, y) => this.occupied(x, y));
     this.followerTile = spot;
     this.tweens.killTweensOf(this.follower);
     this.follower.setPosition(tileCenterX(spot.x), tileBottomY(spot.y));

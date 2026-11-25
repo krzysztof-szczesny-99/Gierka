@@ -361,15 +361,21 @@ export const HERO_FRAMES: Record<string, string[]> = {
   ],
 };
 
-export function drawHero(ctx: Ctx, frame: string, ox = 0, oy = 0): void {
+export function drawHero(ctx: Ctx, frame: string, ox = 0, oy = 0, palette: Partial<Record<string, string>> = {}): void {
   const rows = HERO_FRAMES[frame] ?? HERO_FRAMES['down-0'];
   rows.forEach((row, y) => {
     for (let x = 0; x < row.length; x++) {
-      const c = HERO_PALETTE[row[x]];
+      const c = palette[row[x]] ?? HERO_PALETTE[row[x]];
       if (c) px(ctx, ox + x, oy + y, 1, 1, c);
     }
   });
 }
+
+/** Trenerzy (Sprint 5): ta sama oryginalna postać co gracz, w innych barwach. */
+export const TRAINER_PALETTES: Record<'scout' | 'herbalist', Partial<Record<string, string>>> = {
+  scout: { h: '#4f7a3a', H: '#3b5c2b', b: '#2f4a24', w: '#f2d14b', j: '#7a5230', J: '#5c3d24', g: '#4a5a2f' },
+  herbalist: { h: '#8e5bb5', H: '#6a3f8c', b: '#4d2a66', r: '#2b1d14', w: '#5fb87a', j: '#c96a8b', J: '#9c4d68', g: '#6b8f3e' },
+};
 
 // ───────── zastępcza sylwetka stworzenia 32×32 (oryginalna) ─────────
 

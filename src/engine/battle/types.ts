@@ -1,4 +1,5 @@
 import type { ItemId } from '../../config/items';
+import type { AiProfile } from './ai';
 import type {
   BoostKey,
   Creature,
@@ -27,6 +28,10 @@ export interface BattleSide {
   party: Creature[];
   /** Indeksy aktywnych stworzeń w party (1 w walce pojedynczej, 2 w podwójnej — etap 3). */
   active: number[];
+  /** Profil AI trenera (Sprint 5); brak — dzikie stworzenie (losowy wybór ruchu). */
+  ai?: AiProfile;
+  /** Tura, w której AI ostatnio zmieniło stworzenie (bez zmian tura po turze). */
+  switchedAtTurn?: number;
 }
 
 export interface BattleState {
