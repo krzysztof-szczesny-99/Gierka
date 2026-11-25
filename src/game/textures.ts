@@ -3,7 +3,7 @@
 import * as Phaser from 'phaser';
 import { TYPE_COLOR } from '../config/text';
 import type { PokemonData } from '../engine/types';
-import { drawBlob, drawHero, drawTile, HERO_FRAMES } from './art';
+import { drawBlob, drawHero, drawTile, HERO_FRAMES, TRAINER_PALETTES } from './art';
 import { TILE_COUNT, TILE_SIZE } from './tiles';
 
 export const TILESET_KEY = 'tiles';
@@ -27,6 +27,9 @@ export function createTileset(scene: Phaser.Scene): void {
 export function createHeroTextures(scene: Phaser.Scene): void {
   for (const frame of Object.keys(HERO_FRAMES)) {
     canvasTexture(scene, `hero-${frame}`, 16, 16, (ctx) => drawHero(ctx, frame));
+    for (const [look, palette] of Object.entries(TRAINER_PALETTES)) {
+      canvasTexture(scene, `trainer-${look}-${frame}`, 16, 16, (ctx) => drawHero(ctx, frame, 0, 0, palette));
+    }
   }
 }
 

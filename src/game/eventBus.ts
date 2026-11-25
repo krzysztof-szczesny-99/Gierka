@@ -10,7 +10,12 @@ export type EncounterOutcome = 'win' | 'lose' | 'fled' | 'caught' | 'cancel';
 /** Źródło spotkania: widoczne stworzenie specjalne albo losowanie po kroku w strefie. */
 export type EncounterSource =
   | { kind: 'static'; actorId: string; staticId: string; spawn: WildSpawn }
-  | { kind: 'step'; locationId: string; zoneId: string; zoneName: string; terrainType: TerrainType; encounterTableId: string };
+  | { kind: 'step'; locationId: string; zoneId: string; zoneName: string; terrainType: TerrainType; encounterTableId: string }
+  /** Walka z trenerem (Sprint 5) — po dialogu przed walką; `rematch` — rewanż bez nagrody. */
+  | { kind: 'trainer'; actorId: string; trainerId: string; rematch: boolean };
+
+/** Sposób, w jaki trener zaczął interakcję. */
+export type TrainerTrigger = 'talk' | 'sight' | 'event';
 
 export type StepEncounterSource = Extract<EncounterSource, { kind: 'step' }>;
 
@@ -26,6 +31,8 @@ export interface BusEvents {
   /** Przeniesienie do pozycji w świecie (ta sama lokacja — teleport; inna — przeładowanie sceny z nową mapą). */
   travel: WorldPosition;
   'follower-refresh': undefined;
+  /** Wydarzenie wyzwalające trenera (np. skrypt lokacji) — ta sama ścieżka co wzrok i rozmowa. */
+  'trainer-event': { trainerId: string };
 }
 
 type Handler<T> = (payload: T) => void;

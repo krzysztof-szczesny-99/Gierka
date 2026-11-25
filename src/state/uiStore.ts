@@ -99,8 +99,10 @@ interface UiStore {
   /**
    * Jedyna operacja rozpoczynająca spotkanie. Atomowo (synchronicznie, bez await) sprawdza stan EXPLORATION,
    * brak aktywnego spotkania i odnowienie, przejmuje blokadę i zwraca identyfikator spotkania — albo null.
+   * `explicit` — interakcja rozpoczęta celowo przez gracza (np. rozmowa z trenerem): pomija tylko odnowienie
+   * po poprzedniej walce; trwające spotkanie, okna, dialogi i przejścia nadal blokują.
    */
-  tryStartEncounter(sourceEntityId: string): string | null;
+  tryStartEncounter(sourceEntityId: string, opts?: { explicit?: boolean }): string | null;
   /**
    * Krok gracza na nowe pole: aktualizuje odnowienie i dystans, wykonuje najwyżej jeden rzut, a przy trafieniu
    * od razu przejmuje blokadę (tryStartEncounter). Zwraca decyzję i identyfikator spotkania albo null.
@@ -165,11 +167,11 @@ export const useUi = create<UiStore>()((set, get) => ({
   lastStepDecision: null,
   lastEncounter: null,
 
-  tryStartEncounter: (sourceEntityId) => {
+  tryStartEncounter: (sourceEntityId, opts) => {
     const s = get();
     if (s.mode !== 'overworld') return null;
     if (s.gameMode !== 'EXPLORATION' || s.activeEncounterId !== null) return null;
-    if (s.encounterCooldown > 0) return null;
+    if (s.encounterCooldown > 0 && !opts?.explicit) return null;
     if (s.modal !== null || s.dialog !== null || s.transition || s.learnQueue.length > 0 || s.evolutionQueue.length > 0) return null;
     const id = `enc-${++encounterSeq}`;
     set({ gameMode: 'ENCOUNTER_STARTING', activeEncounterId: id, sourceEntityId, inputLocked: true });

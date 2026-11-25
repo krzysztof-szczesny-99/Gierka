@@ -58,6 +58,7 @@ export const MOVES: Record<string, MoveData> = {
   'water-gun': dmg('water-gun', 'water', 40, 'special'),
   'bug-bite': dmg('bug-bite', 'bug', 60, 'physical'),
   'ice-shard': dmg('ice-shard', 'ice', 40, 'physical'),
+  'thunder-shock': dmg('thunder-shock', 'electric', 40, 'special'),
   'burn-strike': dmg('burn-strike', 'fire', 40, 'special', { ailment: 'burn', ailmentChance: 100, category: 'damage+ailment' }),
   'freeze-strike': dmg('freeze-strike', 'ice', 40, 'special', { ailment: 'freeze', ailmentChance: 100, category: 'damage+ailment' }),
   'flinch-strike': dmg('flinch-strike', 'normal', 40, 'physical', { flinchChance: 100 }),
